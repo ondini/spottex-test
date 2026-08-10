@@ -24,8 +24,14 @@
     0px 20px 20px -4px rgba(0,0,0,0.01);
   --card-inset: inset 0px 0px 1px 1px #fff;
 
-  --font-heading: 'Poppins', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  /* The Figma library (Spottex/Hero_header, H_big, H_semi, Small_header,
+     Text_16, Text_14, Menu) is Inter throughout -- headings included. Both
+     roles resolve to the same self-hosted family loaded in app/layout.tsx;
+     the two names are kept so the heading/body distinction stays readable. */
+  --font-inter-stack: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+  --font-heading: var(--font-inter-stack);
+  --font-body: var(--font-inter-stack);
 }
 
 html { scroll-behavior: smooth; }
@@ -48,7 +54,7 @@ button { cursor: pointer; font-family: var(--font-body); border: none; backgroun
 h1 {
   font-family: var(--font-heading);
   font-size: 54px;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
   color: var(--text-dark);
@@ -56,7 +62,7 @@ h1 {
 h2 {
   font-family: var(--font-heading);
   font-size: 36px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;
   color: var(--text-dark);
@@ -71,7 +77,7 @@ h3 {
 }
 p {
   font-family: var(--font-body);
-  font-weight: 500;
+  font-weight: 400;
   font-size: 16px;
   letter-spacing: -0.03em;
   line-height: 1.6;
@@ -316,21 +322,25 @@ p {
   transform: translateX(-50%);
   color: #fff;
 }
+/* Spottex/Small_header: Inter Bold 13/20, tracking 1.56px. */
 .hero-kicker {
   margin-bottom: 18px;
   color: rgba(255,255,255,.76);
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: .12em;
+  line-height: 20px;
+  letter-spacing: 1.56px;
   text-transform: uppercase;
 }
+/* Spottex/Hero_header: Inter Bold 74/75.48, tracking -1px. 1.02 reproduces
+   75.48px at the 74px design size while staying proportional below it. */
 .hero-copy h1 {
   max-width: 850px;
   color: #fff;
   font-size: clamp(46px, 5.2vw, 74px);
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.02;
-  letter-spacing: -.04em;
+  letter-spacing: -1px;
   text-shadow: 0 2px 20px rgba(0,0,0,.22);
 }
 .hero-copy > p:last-child {
@@ -376,6 +386,7 @@ p {
   max-width: 1200px;
   margin: 0 auto;
 }
+/* Spottex/Small_header: Inter Bold 13/20, tracking 1.56px. */
 .app-showcase-label,
 .journey-heading > span {
   display: inline-block;
@@ -383,22 +394,26 @@ p {
   color: #4d9e32;
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: .1em;
+  line-height: 20px;
+  letter-spacing: 1.56px;
   text-transform: uppercase;
 }
+/* Spottex/H_big: Inter Bold 58/60.9, tracking -1px. */
 .app-showcase-copy h2 {
   max-width: 520px;
   font-size: clamp(38px, 4vw, 58px);
   line-height: 1.05;
-  letter-spacing: -.04em;
+  letter-spacing: -1px;
 }
+/* Spottex/Text_16: Inter Regular 16/25.6, tracking -0.5px. */
 .app-showcase-copy > p {
   max-width: 540px;
   margin-top: 24px;
   color: rgba(28,22,41,.7);
-  font-size: 17px;
-  line-height: 1.65;
-  letter-spacing: -.02em;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: -.5px;
 }
 .app-showcase-points {
   display: grid;
@@ -412,7 +427,7 @@ p {
   padding-left: 26px;
   color: #4e5c49;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
 }
 .app-showcase-points li::before {
@@ -481,48 +496,23 @@ p {
   background: #0e120d;
   transform: translateX(-50%);
 }
+/* The design fills the screen with an exported capture of the real app, not a
+   CSS redraw, so the numbers on the landing page are the product's own. */
 .spottex-phone-screen {
   position: relative;
   overflow: hidden;
   height: 100%;
-  padding: 46px 18px 18px;
   border-radius: 35px;
   background: #fbfcfa;
   color: #1a2117;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-body);
 }
-.phone-header { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
-.phone-header span { display: flex; align-items: center; gap: 6px; font-weight: 750; }
-.phone-header i { width: 7px; height: 7px; border-radius: 50%; background: #69bd45; box-shadow: 0 0 0 3px #e8f5e3; }
-.phone-header b { color: #9aa396; letter-spacing: 2px; }
-.phone-date { margin-top: 7px; color: #98a093; font-size: 9px; }
-.phone-energy-main { margin-top: 18px; padding: 17px 15px 8px; border-radius: 18px; background: #f1f7ed; }
-.phone-energy-main > span { display: block; color: #7e8979; font-size: 9px; }
-.phone-energy-main > strong { display: block; margin-top: 5px; color: #357c27; font-size: 29px; letter-spacing: -.04em; }
-.phone-energy-main small { font-size: 11px; font-weight: 700; }
-.phone-energy-main svg { display: block; width: 100%; margin-top: 5px; }
-.phone-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-.phone-metrics div { padding: 12px; border: 1px solid #e7ece4; border-radius: 13px; background: #fff; }
-.phone-metrics span { display: block; color: #929a8e; font-size: 8px; }
-.phone-metrics strong { display: block; margin-top: 5px; font-size: 13px; }
-.phone-control { margin-top: 10px; padding: 12px; border-radius: 13px; background: #f7f8f6; }
-.phone-control span { display: flex; align-items: center; gap: 6px; color: #5e6959; font-size: 9px; font-weight: 750; }
-.phone-control i { width: 7px; height: 7px; border-radius: 50%; background: #aeb5aa; }
-.phone-control b { display: block; margin-top: 5px; color: #929a8e; font-size: 8px; font-weight: 600; }
-.phone-tabbar { position: absolute; right: 18px; bottom: 16px; left: 18px; display: flex; align-items: center; justify-content: space-around; padding: 11px; border: 1px solid #edf0eb; border-radius: 14px; background: rgba(255,255,255,.94); }
-.phone-tabbar i { width: 8px; height: 8px; border: 2px solid #899384; border-radius: 3px; }
-.phone-tabbar i:first-child { border-color: #5aaa39; background: #dff1d8; }
-.spottex-phone-screen--simulation { padding-top: 67px; background: linear-gradient(180deg, #f8fbf6, #edf5e9); }
-.spottex-phone-screen--simulation .phone-kicker { color: #55993b; font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
-.spottex-phone-screen--simulation > strong { display: block; margin-top: 13px; font-size: 24px; letter-spacing: -.035em; }
-.phone-progress { overflow: hidden; height: 7px; margin-top: 12px; border-radius: 999px; background: #dce8d8; }
-.phone-progress i { display: block; width: 72%; height: 100%; border-radius: inherit; background: #69bd45; }
-.phone-result { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 13px; border-radius: 12px; background: rgba(255,255,255,.82); }
-.phone-result span { color: #84917e; font-size: 9px; }
-.phone-result b { font-size: 12px; }
-.phone-saving { margin-top: 14px; padding: 16px; border-radius: 14px; background: #4a9b31; color: #fff; }
-.phone-saving span { display: block; font-size: 9px; opacity: .8; }
-.phone-saving b { display: block; margin-top: 6px; font-size: 16px; }
+.spottex-phone-screen img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
 .phone-trust-badge {
   position: absolute;
   right: -5px;

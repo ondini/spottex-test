@@ -224,37 +224,16 @@ function AppShowcase({ isAuthenticated = false }) {
         <div className="phone-stage" aria-label="Ukázka mobilní aplikace Spottex">
           <div className="phone-orbit phone-orbit--one" />
           <div className="phone-orbit phone-orbit--two" />
-          <div className="spottex-phone spottex-phone--back" aria-hidden="true">
+          <div className="spottex-phone spottex-phone--back">
             <div className="spottex-phone-notch" />
-            <div className="spottex-phone-screen spottex-phone-screen--simulation">
-              <span className="phone-kicker">Výpočet úspor</span>
-              <strong>72 % hotovo</strong>
-              <div className="phone-progress"><i /></div>
-              <div className="phone-result"><span>Tarif</span><b>D57d</b></div>
-              <div className="phone-result"><span>Baterie</span><b>15 kWh</b></div>
-              <div className="phone-saving"><span>Odhad úspory</span><b>4 860 Kč / rok</b></div>
+            <div className="spottex-phone-screen">
+              <img src="/spottex_app_nahled_1.png" alt="Obrazovka aplikace Spottex s grafem výroby a spotřeby energie" loading="lazy" />
             </div>
           </div>
           <div className="spottex-phone spottex-phone--front">
             <div className="spottex-phone-notch" />
             <div className="spottex-phone-screen">
-              <div className="phone-header"><span><i /> Rodinný dům</span><b>•••</b></div>
-              <p className="phone-date">Dnes · živá data</p>
-              <div className="phone-energy-main">
-                <span>Aktuální výroba</span>
-                <strong>4,28 <small>kW</small></strong>
-                <svg viewBox="0 0 220 86" role="img" aria-label="Průběh výroby">
-                  <defs><linearGradient id="phone-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#69bd45" stopOpacity=".38" /><stop offset="1" stopColor="#69bd45" stopOpacity="0" /></linearGradient></defs>
-                  <path d="M0 76 C28 74 38 68 57 61 C76 54 78 36 99 29 C122 20 130 8 151 17 C173 27 176 51 220 67 L220 86 L0 86Z" fill="url(#phone-fill)" />
-                  <path d="M0 76 C28 74 38 68 57 61 C76 54 78 36 99 29 C122 20 130 8 151 17 C173 27 176 51 220 67" fill="none" stroke="#69bd45" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-              </div>
-              <div className="phone-metrics">
-                <div><span>Spotřeba</span><strong>1,14 kW</strong></div>
-                <div><span>Baterie</span><strong>73 %</strong></div>
-              </div>
-              <div className="phone-control"><span><i /> Řízení vypnuto</span><b>Zapnout až po výpočtu</b></div>
-              <div className="phone-tabbar"><i /><i /><i /><i /></div>
+              <img src="/spottex_app_nahled_2.png" alt="Obrazovka aplikace Spottex s aktuální výrobou, spotřebou a stavem baterie" loading="lazy" />
             </div>
           </div>
           <div className="phone-trust-badge">
