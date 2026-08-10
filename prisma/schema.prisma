@@ -1,0 +1,1794 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["analytics", "auth", "consultation", "content", "general", "jobs", "payment", "tariff"]
+}
+
+enum UserRole {
+  USER
+  ADMIN
+
+  @@schema("general")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING_VERIFICATION
+
+  @@schema("general")
+}
+
+model User {
+  id              Int        @id @default(autoincrement())
+  email           String     @unique
+  passwordHash    String
+  name            String?
+  phone           String?
+  role            UserRole   @default(USER)
+  status          UserStatus @default(PENDING_VERIFICATION)
+  authVersion     Int        @default(0)
+  emailVerifiedAt DateTime?
+  avatarUrl       String?
+  street          String?
+  city            String?
+  postalCode      String?
+  country         String     @default("CZ")
+  companyName     String?
+  companyIdNumber String?
+  vatId           String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  emailVerifications    EmailVerification[]
+  passwordResets        PasswordReset[]
+  energyConnections     EnergyConnection[]
+  energySites           EnergySite[]
+  carts                 Cart[]
+  payments              Payment[]
+  subscriptions         Subscription[]            @relation("SubscriptionUser")
+  activatedPromos       Subscription[]            @relation("SubscriptionActivator")
+  invoices              Invoice[]
+  analyticsEvents       AnalyticsEvent[]
+  authoredPosts         BlogPost[]
+  consultationSlots     ConsultationSlot[]
+  consultationCalendar  ConsultationHostCalendar?
+  auditEvents           AuditLog[]                @relation("AuditActor")
+  confirmedEnergyFields EnergySiteFieldEvidence[] @relation("EnergyFieldConfirmer")
+  serviceOffers         ServiceOffer[]
+  recurringMandates     RecurringPaymentMandate[]
+  recurringRenewals     RecurringRenewal[]
+  energyAnalysisRuns    EnergyAnalysisRun[]
+  confirmedPvArrays     EnergyPvArray[]           @relation("EnergyPvArrayConfirmer")
+  invoiceExtractions    EnergyInvoiceExtraction[] @relation("EnergyInvoiceExtractionActor")
+
+  @@map("users")
+  @@schema("general")
+}
+
+model EmailVerification {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("email_verification")
+  @@schema("auth")
+}
+
+model PasswordReset {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_reset")
+  @@schema("auth")
+}
+
+enum EnergyProvider {
+  LEGACY_SPOTTEX
+  GRIDLINK
+  DEMO
+
+  @@schema("general")
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  ACTION_REQUIRED
+  DISCONNECTED
+  ERROR
+
+  @@schema("general")
+}
+
+model EnergyConnection {
+  id                    Int              @id @default(autoincrement())
+  userId                Int
+  provider              EnergyProvider
+  externalAccountId     String?
+  encryptedAccessToken  String?          @db.Text
+  encryptedRefreshToken String?          @db.Text
+  tokenExpiresAt        DateTime?
+  status                ConnectionStatus @default(CONNECTED)
+  lastError             String?
+  metadata              Json             @default("{}")
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("energy_connection")
+  @@schema("general")
+}
+
+enum EnergySiteStatus {
+  ONLINE
+  OFFLINE
+  ONBOARDING
+  ERROR
+
+  @@schema("general")
+}
+
+model EnergySite {
+  id                   Int                         @id @default(autoincrement())
+  userId               Int
+  provider             EnergyProvider
+  externalSiteId       String
+  name                 String
+  status               EnergySiteStatus            @default(ONBOARDING)
+  timezone             String                      @default("Europe/Prague")
+  ean                  String?
+  address              String?
+  optimizationOn       Boolean                     @default(false)
+  requiredInfo         Boolean                     @default(false)
+  metadata             Json                        @default("{}")
+  lastSyncedAt         DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  user                 User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inverters            Inverter[]
+  technicalProfile     EnergySiteTechnicalProfile?
+  fieldEvidence        EnergySiteFieldEvidence[]
+  invoiceRequests      EnergyInvoiceRequest[]
+  hdoCalendars         EnergyHdoCalendar[]
+  priceCurves          EnergyPriceCurve[]
+  serviceOffers        ServiceOffer[]
+  subscriptions        Subscription[]
+  analysisRuns         EnergyAnalysisRun[]
+  pvArrays             EnergyPvArray[]
+  controlledAppliances ControlledAppliance[]
+  historyImports       EnergyHistoryImport[]
+
+  @@unique([provider, externalSiteId])
+  @@index([userId, status])
+  @@map("energy_site")
+  @@schema("general")
+}
+
+enum EnergyValueSource {
+  SOLAX
+  LEGACY_API
+  EAN_LOOKUP
+  INVOICE
+  USER
+  CATALOG
+  MODEL
+  ADMIN
+
+  @@schema("general")
+}
+
+model EnergySiteTechnicalProfile {
+  id                            Int        @id @default(autoincrement())
+  energySiteId                  Int        @unique
+  distributorCode               String?
+  distributionTariffCode        String?
+  phases                        Int?
+  mainFuseA                     Float?
+  maxGridInputKw                Float?
+  maxGridOutputKw               Float?
+  exportAllowed                 Boolean?
+  pvCapacityKwp                 Float?
+  batteryCapacityKwh            Float?
+  batteryMaxChargeKw            Float?
+  batteryMaxDischargeKw         Float?
+  batteryMinSocPct              Float?
+  batteryMaxSocPct              Float?
+  batteryRoundtripEfficiencyPct Float?
+  buyPricingMode                String?
+  sellPricingMode               String?
+  currentSupplierName           String?
+  currentProductName            String?
+  monthlySupplierFeeCzk         Float?
+  fixedBuyPriceCzkKwh           Float?
+  fixedSellPriceCzkKwh          Float?
+  spotBuyFeeCzkKwh              Float?
+  spotSellFeeCzkKwh             Float?
+  fixedPriceValidUntil          DateTime?
+  hdoStatus                     String?
+  analysisConfirmedAt           DateTime?
+  controlConfirmedAt            DateTime?
+  legacySnapshot                Json       @default("{}")
+  createdAt                     DateTime   @default(now())
+  updatedAt                     DateTime   @updatedAt
+  energySite                    EnergySite @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+
+  @@map("energy_site_technical_profile")
+  @@schema("general")
+}
+
+enum EnergyHistoryImportStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELED
+
+  @@schema("general")
+}
+
+enum EnergyHistoryChunkStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+
+  @@schema("general")
+}
+
+model EnergyHistoryImport {
+  id              String                     @id @default(cuid())
+  energySiteId    Int
+  inverterId      Int
+  requestedFrom   DateTime
+  requestedTo     DateTime
+  status          EnergyHistoryImportStatus  @default(QUEUED)
+  totalChunks     Int
+  succeededChunks Int                        @default(0)
+  failedChunks    Int                        @default(0)
+  importedPoints  Int                        @default(0)
+  lastError       String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  energySite      EnergySite                 @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  inverter        Inverter                   @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+  chunks          EnergyHistoryImportChunk[]
+
+  @@index([energySiteId, status, createdAt])
+  @@index([inverterId, createdAt])
+  @@map("energy_history_import")
+  @@schema("general")
+}
+
+model EnergyHistoryImportChunk {
+  id             String                   @id @default(cuid())
+  importId       String
+  chunkFrom      DateTime
+  chunkTo        DateTime
+  status         EnergyHistoryChunkStatus @default(PENDING)
+  attempts       Int                      @default(0)
+  maxAttempts    Int                      @default(4)
+  importedPoints Int                      @default(0)
+  lastError      String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  historyImport  EnergyHistoryImport      @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, chunkFrom])
+  @@index([status, updatedAt])
+  @@map("energy_history_import_chunk")
+  @@schema("general")
+}
+
+model EnergyPvArray {
+  id                   Int               @id @default(autoincrement())
+  energySiteId         Int
+  inverterId           Int?
+  name                 String
+  panelCount           Int?
+  panelRatedWp         Float?
+  nominalDcCapacityKwp Float?
+  active               Boolean           @default(true)
+  source               EnergyValueSource @default(USER)
+  sourceReference      String?
+  observedAt           DateTime          @default(now())
+  confirmedAt          DateTime?
+  confirmedByUserId    Int?
+  metadata             Json              @default("{}")
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  energySite           EnergySite        @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  inverter             Inverter?         @relation(fields: [inverterId], references: [id], onDelete: SetNull)
+  confirmedBy          User?             @relation("EnergyPvArrayConfirmer", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([energySiteId, active])
+  @@index([inverterId])
+  @@map("energy_pv_array")
+  @@schema("general")
+}
+
+enum ControlledApplianceType {
+  HEAT_PUMP
+  WATER_HEATER
+  EV_CHARGER
+  HVAC
+  POOL
+  OTHER
+
+  @@schema("general")
+}
+
+enum ControlledApplianceStatus {
+  DECLARED
+  READY
+  CONNECTED
+  DISABLED
+
+  @@schema("general")
+}
+
+model ControlledAppliance {
+  id                Int                       @id @default(autoincrement())
+  energySiteId      Int
+  name              String
+  type              ControlledApplianceType
+  status            ControlledApplianceStatus @default(DECLARED)
+  ratedPowerKw      Float?
+  controllable      Boolean                   @default(false)
+  minRuntimeMinutes Int?
+  maxRuntimeMinutes Int?
+  constraints       Json                      @default("{}")
+  source            EnergyValueSource         @default(USER)
+  sourceReference   String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  energySite        EnergySite                @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+
+  @@index([energySiteId, status])
+  @@map("controlled_appliance")
+  @@schema("general")
+}
+
+model EnergySiteFieldEvidence {
+  id                BigInt            @id @default(autoincrement())
+  energySiteId      Int
+  field             String
+  value             Json
+  source            EnergyValueSource
+  sourceReference   String?
+  observedAt        DateTime          @default(now())
+  confirmedAt       DateTime?
+  confirmedByUserId Int?
+  createdAt         DateTime          @default(now())
+  energySite        EnergySite        @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  confirmedBy       User?             @relation("EnergyFieldConfirmer", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([energySiteId, field, observedAt])
+  @@map("energy_site_field_evidence")
+  @@schema("general")
+}
+
+enum EnergyInvoiceRequestStatus {
+  REQUESTED
+  RECEIVED
+  PROCESSING
+  NEEDS_INPUT
+  CONFIRMED
+  CANCELED
+
+  @@schema("general")
+}
+
+model EnergyInvoiceRequest {
+  id            String                     @id @default(cuid())
+  energySiteId  Int
+  referenceCode String                     @unique
+  contactEmail  String                     @default("contact@spottex.cz")
+  status        EnergyInvoiceRequestStatus @default(REQUESTED)
+  receivedAt    DateTime?
+  processedAt   DateTime?
+  notes         String?                    @db.Text
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  energySite    EnergySite                 @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  documents     EnergyInvoiceDocument[]
+  extractions   EnergyInvoiceExtraction[]
+
+  @@index([energySiteId, status, createdAt])
+  @@map("energy_invoice_request")
+  @@schema("general")
+}
+
+model EnergyInvoiceDocument {
+  id                String               @id @default(cuid())
+  invoiceRequestId  String
+  storageProvider   String
+  storageKey        String
+  encryptedContent  Bytes?
+  encryptionVersion String               @default("AES_256_GCM_V1")
+  originalFileName  String
+  mimeType          String
+  sizeBytes         Int
+  contentSha256     String
+  billingPeriodFrom DateTime?
+  billingPeriodTo   DateTime?
+  extractionVersion String?
+  extractedData     Json                 @default("{}")
+  sensitive         Boolean              @default(true)
+  retainedUntil     DateTime
+  deletedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  invoiceRequest    EnergyInvoiceRequest @relation(fields: [invoiceRequestId], references: [id], onDelete: Cascade)
+  extractions       EnergyInvoiceExtraction[]
+
+  @@unique([invoiceRequestId, contentSha256])
+  @@index([retainedUntil, deletedAt])
+  @@map("energy_invoice_document")
+  @@schema("general")
+}
+
+model EnergyInvoiceExtraction {
+  id               String                @id @default(cuid())
+  invoiceRequestId String
+  documentId       String?
+  version          Int
+  method           String                @default("MANUAL")
+  schemaVersion    String                @default("energy-invoice-v1")
+  billingPeriodFrom DateTime?
+  billingPeriodTo  DateTime?
+  extractedData    Json                  @default("{}")
+  reviewedByUserId Int?
+  createdAt        DateTime              @default(now())
+  invoiceRequest   EnergyInvoiceRequest  @relation(fields: [invoiceRequestId], references: [id], onDelete: Cascade)
+  document         EnergyInvoiceDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  reviewedBy       User?                 @relation("EnergyInvoiceExtractionActor", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([invoiceRequestId, version])
+  @@index([documentId, createdAt])
+  @@map("energy_invoice_extraction")
+  @@schema("general")
+}
+
+enum CatalogPublicationStatus {
+  DRAFT
+  VALIDATED
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+
+  @@schema("tariff")
+}
+
+enum EnergyPricingMode {
+  FIX
+  SPOT
+  TIME_CURVE
+
+  @@schema("tariff")
+}
+
+model EnergyCompany {
+  id                  Int                     @id @default(autoincrement())
+  code                String                  @unique
+  name                String
+  websiteUrl          String?
+  roles               String[]                @default([])
+  active              Boolean                 @default(true)
+  metadata            Json                    @default("{}")
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  products            EnergyProduct[]
+  distributionTariffs DistributionTariff[]
+  sourceDocuments     CatalogSourceDocument[]
+
+  @@map("energy_company")
+  @@schema("tariff")
+}
+
+model CatalogSourceDocument {
+  id                   String                      @id @default(cuid())
+  companyId            Int?
+  kind                 String
+  title                String
+  sourceUrl            String
+  contentSha256        String
+  retrievedAt          DateTime                    @default(now())
+  validFrom            DateTime?
+  validTo              DateTime?
+  status               CatalogPublicationStatus    @default(DRAFT)
+  rawText              String?                     @db.Text
+  metadata             Json                        @default("{}")
+  reviewedAt           DateTime?
+  reviewedBy           String?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  company              EnergyCompany?              @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  productVersions      EnergyProductVersion[]
+  distributionVersions DistributionTariffVersion[]
+  fundingVersions      FundingProgramVersion[]
+
+  @@unique([sourceUrl, contentSha256])
+  @@index([kind, status, retrievedAt])
+  @@map("catalog_source_document")
+  @@schema("tariff")
+}
+
+enum FundingProgramKind {
+  GRANT
+  LOAN
+
+  @@schema("tariff")
+}
+
+model FundingProgram {
+  id           Int                     @id @default(autoincrement())
+  code         String                  @unique
+  name         String
+  kind         FundingProgramKind
+  providerName String
+  officialUrl  String
+  active       Boolean                 @default(true)
+  metadata     Json                    @default("{}")
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  versions     FundingProgramVersion[]
+
+  @@index([kind, active])
+  @@map("funding_program")
+  @@schema("tariff")
+}
+
+model FundingProgramVersion {
+  id                    Int                      @id @default(autoincrement())
+  fundingProgramId      Int
+  sourceDocumentId      String
+  validFrom             DateTime
+  validTo               DateTime?
+  status                CatalogPublicationStatus @default(DRAFT)
+  territoryCodes        String[]                 @default([])
+  customerSegments      String[]                 @default([])
+  supportedTechnologies String[]                 @default([])
+  minimumAmountCzk      Decimal?                 @db.Decimal(14, 2)
+  maximumAmountCzk      Decimal?                 @db.Decimal(14, 2)
+  subsidyRatePct        Decimal?                 @db.Decimal(7, 4)
+  interestRatePct       Decimal?                 @db.Decimal(7, 4)
+  aprPct                Decimal?                 @db.Decimal(7, 4)
+  feesCzk               Decimal?                 @db.Decimal(14, 2)
+  conditions            Json                     @default("{}")
+  calculationFormula    Json                     @default("{}")
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  fundingProgram        FundingProgram           @relation(fields: [fundingProgramId], references: [id], onDelete: Cascade)
+  sourceDocument        CatalogSourceDocument    @relation(fields: [sourceDocumentId], references: [id], onDelete: Restrict)
+
+  @@unique([fundingProgramId, validFrom])
+  @@index([status, validFrom, validTo])
+  @@map("funding_program_version")
+  @@schema("tariff")
+}
+
+model EnergyProduct {
+  id              Int                    @id @default(autoincrement())
+  supplierId      Int
+  code            String
+  name            String
+  customerSegment String                 @default("HOUSEHOLD")
+  active          Boolean                @default(true)
+  metadata        Json                   @default("{}")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  supplier        EnergyCompany          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  versions        EnergyProductVersion[]
+
+  @@unique([supplierId, code])
+  @@index([customerSegment, active])
+  @@map("energy_product")
+  @@schema("tariff")
+}
+
+model EnergyProductVersion {
+  id                Int                      @id @default(autoincrement())
+  productId         Int
+  sourceDocumentId  String?
+  validFrom         DateTime
+  validTo           DateTime?
+  status            CatalogPublicationStatus @default(DRAFT)
+  currency          String                   @default("CZK")
+  vatIncluded       Boolean                  @default(true)
+  buyMode           EnergyPricingMode
+  sellMode          EnergyPricingMode
+  monthlyFeeCzk     Decimal                  @default(0) @db.Decimal(14, 2)
+  fixedBuyVtCzkKwh  Decimal?                 @db.Decimal(14, 6)
+  fixedBuyNtCzkKwh  Decimal?                 @db.Decimal(14, 6)
+  fixedSellVtCzkKwh Decimal?                 @db.Decimal(14, 6)
+  fixedSellNtCzkKwh Decimal?                 @db.Decimal(14, 6)
+  spotBuyFeeCzkKwh  Decimal?                 @db.Decimal(14, 6)
+  spotSellFeeCzkKwh Decimal?                 @db.Decimal(14, 6)
+  formula           Json                     @default("{}")
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  product           EnergyProduct            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceDocument    CatalogSourceDocument?   @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  buyPriceCurves    EnergyPriceCurve[]       @relation("BuyProductVersion")
+  sellPriceCurves   EnergyPriceCurve[]       @relation("SellProductVersion")
+
+  @@unique([productId, validFrom])
+  @@index([status, validFrom, validTo])
+  @@map("energy_product_version")
+  @@schema("tariff")
+}
+
+model DistributionTariff {
+  id              Int                         @id @default(autoincrement())
+  distributorId   Int
+  code            String
+  name            String
+  customerSegment String                      @default("HOUSEHOLD")
+  eligibilityNote String?                     @db.Text
+  active          Boolean                     @default(true)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  distributor     EnergyCompany               @relation(fields: [distributorId], references: [id], onDelete: Restrict)
+  versions        DistributionTariffVersion[]
+
+  @@unique([distributorId, code, customerSegment])
+  @@index([customerSegment, active])
+  @@map("distribution_tariff")
+  @@schema("tariff")
+}
+
+model DistributionTariffVersion {
+  id                   Int                      @id @default(autoincrement())
+  distributionTariffId Int
+  sourceDocumentId     String?
+  validFrom            DateTime
+  validTo              DateTime?
+  status               CatalogPublicationStatus @default(DRAFT)
+  currency             String                   @default("CZK")
+  vatIncluded          Boolean                  @default(true)
+  distributionVtCzkKwh Decimal                  @db.Decimal(14, 6)
+  distributionNtCzkKwh Decimal                  @db.Decimal(14, 6)
+  systemServicesCzkKwh Decimal                  @default(0) @db.Decimal(14, 6)
+  electricityTaxCzkKwh Decimal                  @default(0) @db.Decimal(14, 6)
+  pozeCzkKwh           Decimal                  @default(0) @db.Decimal(14, 6)
+  monthlyMeterFeeCzk   Decimal                  @default(0) @db.Decimal(14, 2)
+  breakerFees          Json                     @default("{}")
+  eligibility          Json                     @default("{}")
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  distributionTariff   DistributionTariff       @relation(fields: [distributionTariffId], references: [id], onDelete: Cascade)
+  sourceDocument       CatalogSourceDocument?   @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  priceCurves          EnergyPriceCurve[]
+
+  @@unique([distributionTariffId, validFrom])
+  @@index([status, validFrom, validTo])
+  @@map("distribution_tariff_version")
+  @@schema("tariff")
+}
+
+model MarketPriceSeries {
+  id                String                   @id @default(cuid())
+  code              String
+  market            String
+  currency          String                   @default("CZK")
+  timezone          String                   @default("Europe/Prague")
+  resolutionMinutes Int
+  validFrom         DateTime
+  validTo           DateTime
+  sourceUrl         String?
+  sourceSha256      String?
+  status            CatalogPublicationStatus @default(DRAFT)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  points            MarketPricePoint[]
+  priceCurves       EnergyPriceCurve[]
+
+  @@unique([code, validFrom, resolutionMinutes])
+  @@index([market, status, validFrom])
+  @@map("market_price_series")
+  @@schema("tariff")
+}
+
+model MarketPricePoint {
+  id          BigInt            @id @default(autoincrement())
+  seriesId    String
+  startAt     DateTime
+  endAt       DateTime
+  priceCzkMwh Decimal           @db.Decimal(16, 6)
+  predicted   Boolean           @default(false)
+  series      MarketPriceSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, startAt])
+  @@index([startAt])
+  @@index([seriesId, predicted, startAt])
+  @@map("market_price_point")
+  @@schema("tariff")
+}
+
+enum HdoCalendarSource {
+  DISTRIBUTOR
+  USER
+  INVOICE
+  MODEL
+
+  @@schema("general")
+}
+
+model EnergyHdoCalendar {
+  id              String              @id @default(cuid())
+  energySiteId    Int
+  validFrom       DateTime
+  validTo         DateTime
+  source          HdoCalendarSource
+  exact           Boolean             @default(false)
+  confidencePct   Float?
+  sourceReference String?
+  eanSnapshot     String?
+  distributorCode String?
+  timezone        String              @default("Europe/Prague")
+  retrievedAt     DateTime?
+  verifiedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  energySite      EnergySite          @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  intervals       EnergyHdoInterval[]
+  priceCurves     EnergyPriceCurve[]
+
+  @@index([energySiteId, validFrom, validTo])
+  @@index([eanSnapshot, distributorCode, validFrom, validTo])
+  @@map("energy_hdo_calendar")
+  @@schema("general")
+}
+
+model EnergyHdoInterval {
+  id         BigInt            @id @default(autoincrement())
+  calendarId String
+  startAt    DateTime
+  endAt      DateTime
+  lowTariff  Boolean           @default(true)
+  calendar   EnergyHdoCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  @@unique([calendarId, startAt])
+  @@index([startAt, endAt])
+  @@map("energy_hdo_interval")
+  @@schema("general")
+}
+
+enum EnergyPriceCurveStatus {
+  DRAFT
+  READY
+  INVALID
+  SUPERSEDED
+
+  @@schema("general")
+}
+
+model EnergyPriceCurve {
+  id                    String                     @id @default(cuid())
+  energySiteId          Int?
+  buyProductVersionId   Int?
+  sellProductVersionId  Int?
+  distributionVersionId Int?
+  marketPriceSeriesId   String?
+  hdoCalendarId         String?
+  fingerprint           String                     @unique
+  purpose               String
+  algorithmVersion      String
+  timezone              String                     @default("Europe/Prague")
+  resolutionMinutes     Int                        @default(15)
+  validFrom             DateTime
+  validTo               DateTime
+  monthlyFixedCzk       Decimal                    @default(0) @db.Decimal(14, 2)
+  status                EnergyPriceCurveStatus     @default(DRAFT)
+  assumptions           Json                       @default("{}")
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  energySite            EnergySite?                @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  buyProductVersion     EnergyProductVersion?      @relation("BuyProductVersion", fields: [buyProductVersionId], references: [id], onDelete: Restrict)
+  sellProductVersion    EnergyProductVersion?      @relation("SellProductVersion", fields: [sellProductVersionId], references: [id], onDelete: Restrict)
+  distributionVersion   DistributionTariffVersion? @relation(fields: [distributionVersionId], references: [id], onDelete: Restrict)
+  marketPriceSeries     MarketPriceSeries?         @relation(fields: [marketPriceSeriesId], references: [id], onDelete: Restrict)
+  hdoCalendar           EnergyHdoCalendar?         @relation(fields: [hdoCalendarId], references: [id], onDelete: SetNull)
+  points                EnergyPriceCurvePoint[]
+  analysisScenarios     EnergyAnalysisScenario[]
+
+  @@index([energySiteId, status, validFrom])
+  @@index([buyProductVersionId, sellProductVersionId, distributionVersionId])
+  @@map("energy_price_curve")
+  @@schema("general")
+}
+
+enum EnergyAnalysisStatus {
+  DRAFT
+  WAITING_FOR_DATA
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  SUPERSEDED
+
+  @@schema("general")
+}
+
+enum EnergyAnalysisKind {
+  BASE
+  PRO
+
+  @@schema("general")
+}
+
+enum AnalysisControlMode {
+  SELF_USE
+  SMART
+
+  @@schema("general")
+}
+
+enum AnalysisScenarioStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  INELIGIBLE
+
+  @@schema("general")
+}
+
+model EnergyAnalysisRun {
+  id                      String                   @id @default(cuid())
+  userId                  Int
+  energySiteId            Int
+  status                  EnergyAnalysisStatus     @default(DRAFT)
+  kind                    EnergyAnalysisKind       @default(BASE)
+  engineVersion           String
+  methodologyVersion      String
+  inputFingerprint        String
+  dataFrom                DateTime?
+  dataTo                  DateTime?
+  confidence              String?
+  requestedPointCount     Int                      @default(0)
+  includedPointCount      Int                      @default(0)
+  billablePointCount      Int                      @default(0)
+  pricePerExtraPointMinor Int                      @default(1000)
+  catalogComparisonPriceMinor Int                  @default(0)
+  proPriceMinor           Int                      @default(0)
+  inputs                  Json                     @default("{}")
+  assumptions             Json                     @default("{}")
+  sourceVersions          Json                     @default("{}")
+  errorCode               String?
+  errorMessage            String?
+  startedAt               DateTime?
+  completedAt             DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  user                    User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  energySite              EnergySite               @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  scenarios               EnergyAnalysisScenario[]
+  serviceOffers           ServiceOffer[]
+  payments                Payment[]
+
+  @@unique([energySiteId, inputFingerprint])
+  @@index([userId, status, createdAt])
+  @@index([energySiteId, status, createdAt])
+  @@map("energy_analysis_run")
+  @@schema("general")
+}
+
+model EnergyAnalysisScenario {
+  id                     String                 @id @default(cuid())
+  analysisRunId          String
+  scenarioKey            String
+  label                  String
+  status                 AnalysisScenarioStatus @default(QUEUED)
+  controlMode            AnalysisControlMode
+  priceCurveId           String
+  batteryCapacityKwh     Float
+  batteryMaxChargeKw     Float
+  batteryMaxDischargeKw  Float
+  pvCapacityKwp          Float
+  maxGridInputKw         Float?
+  maxGridOutputKw        Float?
+  mainFuseA              Float?
+  annualCostCzk          Decimal?               @db.Decimal(14, 2)
+  annualCostLowerCzk     Decimal?               @db.Decimal(14, 2)
+  annualCostUpperCzk     Decimal?               @db.Decimal(14, 2)
+  annualImportCostCzk    Decimal?               @db.Decimal(14, 2)
+  annualExportRevenueCzk Decimal?               @db.Decimal(14, 2)
+  annualFixedCostCzk     Decimal?               @db.Decimal(14, 2)
+  savingsVsBaselineCzk   Decimal?               @db.Decimal(14, 2)
+  savingsVsSelfUseCzk    Decimal?               @db.Decimal(14, 2)
+  savingsProductCzk      Decimal?               @db.Decimal(14, 2)
+  savingsDistributionCzk Decimal?               @db.Decimal(14, 2)
+  savingsControlCzk      Decimal?               @db.Decimal(14, 2)
+  importedKwh            Float?
+  exportedKwh            Float?
+  chargedKwh             Float?
+  dischargedKwh          Float?
+  batteryCycles          Float?
+  peakImportKw           Float?
+  result                 Json                   @default("{}")
+  assumptions            Json                   @default("{}")
+  completedAt            DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  analysisRun            EnergyAnalysisRun      @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
+  priceCurve             EnergyPriceCurve       @relation(fields: [priceCurveId], references: [id], onDelete: Restrict)
+
+  @@unique([analysisRunId, scenarioKey])
+  @@index([analysisRunId, status])
+  @@index([priceCurveId])
+  @@map("energy_analysis_scenario")
+  @@schema("general")
+}
+
+model EnergyPriceCurvePoint {
+  id                   BigInt           @id @default(autoincrement())
+  curveId              String
+  startAt              DateTime
+  endAt                DateTime
+  lowTariff            Boolean
+  commodityBuyCzkKwh   Decimal          @db.Decimal(14, 6)
+  commoditySellCzkKwh  Decimal          @db.Decimal(14, 6)
+  distributionCzkKwh   Decimal          @db.Decimal(14, 6)
+  otherRegulatedCzkKwh Decimal          @db.Decimal(14, 6)
+  totalBuyCzkKwh       Decimal          @db.Decimal(14, 6)
+  totalSellCzkKwh      Decimal          @db.Decimal(14, 6)
+  curve                EnergyPriceCurve @relation(fields: [curveId], references: [id], onDelete: Cascade)
+
+  @@unique([curveId, startAt])
+  @@index([startAt])
+  @@map("energy_price_curve_point")
+  @@schema("general")
+}
+
+enum InverterStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+  ERROR
+
+  @@schema("general")
+}
+
+model Inverter {
+  id               Int                   @id @default(autoincrement())
+  energySiteId     Int
+  provider         EnergyProvider
+  externalDeviceId String
+  name             String?
+  manufacturer     String?
+  model            String?
+  serialNumber     String?
+  status           InverterStatus        @default(UNKNOWN)
+  lastSeenAt       DateTime?
+  metadata         Json                  @default("{}")
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  energySite       EnergySite            @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  measurements     EnergyMeasurement[]
+  intervals        EnergyInterval[]
+  forecastSnapshots EnergyForecastSnapshot[]
+  schedules        InverterSchedule[]
+  commands         InverterCommand[]
+  pvArrays         EnergyPvArray[]
+  historyImports   EnergyHistoryImport[]
+
+  @@unique([provider, externalDeviceId])
+  @@index([energySiteId, status])
+  @@map("inverter")
+  @@schema("general")
+}
+
+model EnergyMeasurement {
+  id            BigInt   @id @default(autoincrement())
+  inverterId    Int
+  measuredAt    DateTime
+  productionKw  Float?
+  consumptionKw Float?
+  gridKw        Float?
+  batteryKw     Float?
+  batterySocPct Float?
+  buyPriceCzk   Float?
+  sellPriceCzk  Float?
+  raw           Json     @default("{}")
+  inverter      Inverter @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+
+  @@unique([inverterId, measuredAt])
+  @@index([measuredAt])
+  @@map("energy_measurement")
+  @@schema("general")
+}
+
+enum EnergyIntervalKind {
+  PRODUCTION
+  CONSUMPTION
+  BATTERY
+  GRID_IMPORT
+  GRID_EXPORT
+
+  @@schema("general")
+}
+
+model EnergyInterval {
+  id         BigInt             @id @default(autoincrement())
+  inverterId Int
+  kind       EnergyIntervalKind
+  startAt    DateTime
+  endAt      DateTime
+  kwh        Float
+  predicted  Boolean            @default(false)
+  inverter   Inverter           @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+  corrections EnergyIntervalCorrection[]
+
+  @@unique([inverterId, kind, startAt])
+  @@index([inverterId, startAt])
+  @@map("energy_interval")
+  @@schema("general")
+}
+
+model EnergyIntervalCorrection {
+  id                   BigInt         @id @default(autoincrement())
+  intervalId           BigInt
+  originalEndAt        DateTime
+  originalKwh          Float
+  originalPredicted    Boolean
+  correctedEndAt       DateTime
+  correctedKwh         Float
+  correctedPredicted   Boolean
+  reason               String
+  sourceReference      String?
+  createdAt            DateTime       @default(now())
+  interval             EnergyInterval @relation(fields: [intervalId], references: [id], onDelete: Cascade)
+
+  @@index([intervalId, createdAt])
+  @@map("energy_interval_correction")
+  @@schema("general")
+}
+
+model EnergyForecastSnapshot {
+  id             BigInt             @id @default(autoincrement())
+  inverterId     Int
+  kind           EnergyIntervalKind
+  generatedAt    DateTime
+  targetStartAt  DateTime
+  targetEndAt    DateTime
+  horizonMinutes Int
+  predictedKwh   Float
+  actualKwh      Float?
+  actualObservedAt DateTime?
+  modelVersion   String
+  source         String
+  createdAt      DateTime           @default(now())
+  inverter       Inverter           @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+
+  @@unique([inverterId, kind, generatedAt, targetStartAt])
+  @@index([inverterId, kind, targetStartAt])
+  @@index([actualObservedAt, targetStartAt])
+  @@map("energy_forecast_snapshot")
+  @@schema("general")
+}
+
+model InverterSchedule {
+  id         BigInt   @id @default(autoincrement())
+  inverterId Int
+  startAt    DateTime
+  endAt      DateTime
+  mode       String
+  sellKw     Float?
+  buyKw      Float?
+  batteryKw  Float?
+  targetSoc  Float?
+  costCzk    Float?
+  source     String   @default("ENERGY_API")
+  inverter   Inverter @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+
+  @@unique([inverterId, startAt, mode])
+  @@index([inverterId, startAt])
+  @@map("inverter_schedule")
+  @@schema("general")
+}
+
+enum CommandStatus {
+  PENDING
+  SENT
+  ACKNOWLEDGED
+  FAILED
+  CANCELED
+
+  @@schema("general")
+}
+
+model InverterCommand {
+  id             String        @id @default(cuid())
+  inverterId     Int
+  requestedById  Int
+  idempotencyKey String        @unique
+  type           String
+  payload        Json          @default("{}")
+  status         CommandStatus @default(PENDING)
+  response       Json?
+  error          String?
+  requestedAt    DateTime      @default(now())
+  completedAt    DateTime?
+  inverter       Inverter      @relation(fields: [inverterId], references: [id], onDelete: Cascade)
+
+  @@index([inverterId, requestedAt])
+  @@index([status, requestedAt])
+  @@map("inverter_command")
+  @@schema("general")
+}
+
+enum ProductType {
+  SUBSCRIPTION
+  ONE_TIME
+
+  @@schema("payment")
+}
+
+model Product {
+  id                Int                @id @default(autoincrement())
+  code              String             @unique
+  name              String
+  description       String?
+  type              ProductType
+  priceMinor        Int
+  currency          String             @default("CZK")
+  billingPeriodDays Int?
+  active            Boolean            @default(true)
+  metadata          Json               @default("{}")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  cartItems         CartItem[]
+  subscriptions     Subscription[]
+  recurringRenewals RecurringRenewal[]
+
+  @@map("product")
+  @@schema("payment")
+}
+
+enum CartStatus {
+  OPEN
+  CHECKOUT
+  PAID
+  ABANDONED
+  CANCELED
+
+  @@schema("payment")
+}
+
+model Cart {
+  id         String     @id @default(cuid())
+  userId     Int
+  status     CartStatus @default(OPEN)
+  currency   String     @default("CZK")
+  totalMinor Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items      CartItem[]
+  payments   Payment[]
+
+  @@index([userId, status])
+  @@map("cart")
+  @@schema("payment")
+}
+
+model CartItem {
+  id             Int     @id @default(autoincrement())
+  cartId         String
+  productId      Int
+  quantity       Int     @default(1)
+  unitPriceMinor Int
+  productName    String
+  metadata       Json    @default("{}")
+  cart           Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product        Product @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+  @@map("cart_item")
+  @@schema("payment")
+}
+
+enum PaymentProvider {
+  MOCK
+  GOPAY
+  BANK_TRANSFER
+  MANUAL
+
+  @@schema("payment")
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PAID
+  FAILED
+  CANCELED
+  REFUNDED
+
+  @@schema("payment")
+}
+
+model Payment {
+  id                 String                   @id @default(cuid())
+  userId             Int
+  cartId             String?
+  provider           PaymentProvider
+  providerPaymentId  String?
+  status             PaymentStatus            @default(CREATED)
+  amountMinor        Int
+  currency           String                   @default("CZK")
+  idempotencyKey     String                   @unique
+  providerPayload    Json                     @default("{}")
+  chargeKind         PaymentChargeKind        @default(ONE_OFF)
+  recurringMandateId String?
+  serviceOfferId     String?
+  recurringRenewalId String?
+  analysisRunId      String?
+  paidAt             DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  cart               Cart?                    @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  invoices           Invoice[]
+  subscriptions      Subscription[]
+  recurringMandate   RecurringPaymentMandate? @relation(fields: [recurringMandateId], references: [id], onDelete: SetNull)
+  serviceOffer       ServiceOffer?            @relation(fields: [serviceOfferId], references: [id], onDelete: SetNull)
+  recurringRenewal   RecurringRenewal?        @relation(fields: [recurringRenewalId], references: [id], onDelete: SetNull)
+  analysisRun        EnergyAnalysisRun?       @relation(fields: [analysisRunId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerPaymentId])
+  @@index([userId, createdAt])
+  @@index([recurringMandateId, createdAt])
+  @@index([serviceOfferId, createdAt])
+  @@index([recurringRenewalId, createdAt])
+  @@index([analysisRunId, createdAt])
+  @@map("payment")
+  @@schema("payment")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIAL
+  PAST_DUE
+  CANCELED
+  EXPIRED
+
+  @@schema("payment")
+}
+
+enum SubscriptionSource {
+  PAID
+  PROMO
+  MANUAL
+
+  @@schema("payment")
+}
+
+model Subscription {
+  id                 String                   @id @default(cuid())
+  userId             Int
+  productId          Int
+  paymentId          String?
+  status             SubscriptionStatus
+  source             SubscriptionSource
+  startsAt           DateTime
+  endsAt             DateTime?
+  canceledAt         DateTime?
+  activatedByAdminId Int?
+  activationReason   String?
+  metadata           Json                     @default("{}")
+  recurringMandateId String?
+  energySiteId       Int?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  user               User                     @relation("SubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
+  product            Product                  @relation(fields: [productId], references: [id])
+  payment            Payment?                 @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  activatedByAdmin   User?                    @relation("SubscriptionActivator", fields: [activatedByAdminId], references: [id], onDelete: SetNull)
+  recurringMandate   RecurringPaymentMandate? @relation(fields: [recurringMandateId], references: [id], onDelete: SetNull)
+  energySite         EnergySite?              @relation(fields: [energySiteId], references: [id], onDelete: SetNull)
+  recurringRenewal   RecurringRenewal?
+
+  @@index([userId, status, startsAt])
+  @@index([energySiteId, status, startsAt])
+  @@map("subscription")
+  @@schema("payment")
+}
+
+enum PaymentChargeKind {
+  ONE_OFF
+  MANDATE_FIRST
+  MANDATE_REPEAT
+
+  @@schema("payment")
+}
+
+enum RecurringMandateStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  EXPIRED
+  FAILED
+
+  @@schema("payment")
+}
+
+model RecurringPaymentMandate {
+  id                      String                 @id @default(cuid())
+  userId                  Int
+  provider                PaymentProvider
+  providerParentPaymentId String
+  status                  RecurringMandateStatus @default(PENDING)
+  currency                String                 @default("CZK")
+  maxAmountMinor          Int
+  renewalPeriodDays       Int                    @default(365)
+  noticeDays              Int                    @default(14)
+  consentVersion          String
+  consentTextSha256       String
+  consentedAt             DateTime
+  validUntil              DateTime?
+  lastUsedAt              DateTime?
+  revokedAt               DateTime?
+  failureReason           String?
+  metadata                Json                   @default("{}")
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  user                    User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments                Payment[]
+  subscriptions           Subscription[]
+  renewals                RecurringRenewal[]
+
+  @@unique([provider, providerParentPaymentId])
+  @@index([userId, status, createdAt])
+  @@map("recurring_payment_mandate")
+  @@schema("payment")
+}
+
+enum RecurringRenewalStatus {
+  SCHEDULED
+  NOTICE_SENT
+  CHARGE_PENDING
+  RETRY
+  PAID
+  FAILED
+  CANCELED
+
+  @@schema("payment")
+}
+
+model RecurringRenewal {
+  id                 String                  @id @default(cuid())
+  userId             Int
+  recurringMandateId String
+  subscriptionId     String                  @unique
+  productId          Int
+  status             RecurringRenewalStatus  @default(SCHEDULED)
+  amountMinor        Int
+  currency           String                  @default("CZK")
+  noticeAt           DateTime
+  scheduledAt        DateTime
+  noticeSentAt       DateTime?
+  attemptCount       Int                     @default(0)
+  nextAttemptAt      DateTime?
+  lastError          String?
+  completedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recurringMandate   RecurringPaymentMandate @relation(fields: [recurringMandateId], references: [id], onDelete: Cascade)
+  subscription       Subscription            @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  product            Product                 @relation(fields: [productId], references: [id], onDelete: Restrict)
+  payments           Payment[]
+
+  @@index([status, noticeAt])
+  @@index([status, scheduledAt])
+  @@index([recurringMandateId, status])
+  @@map("recurring_renewal")
+  @@schema("payment")
+}
+
+enum ServiceOfferStatus {
+  DRAFT
+  OFFERED
+  ACCEPTED
+  EXPIRED
+  CANCELED
+
+  @@schema("payment")
+}
+
+model ServiceOffer {
+  id                          String             @id @default(cuid())
+  userId                      Int
+  energySiteId                Int
+  analysisJobId               String?
+  analysisRunId               String?
+  status                      ServiceOfferStatus @default(DRAFT)
+  currency                    String             @default("CZK")
+  expectedControlSavingsMinor Int
+  listPriceMinor              Int                @default(99000)
+  savingsShareBps             Int                @default(2500)
+  discountMinor               Int
+  finalPriceMinor             Int
+  methodologyVersion          String
+  inputFingerprint            String
+  assumptions                 Json               @default("{}")
+  validUntil                  DateTime
+  acceptedAt                  DateTime?
+  createdAt                   DateTime           @default(now())
+  updatedAt                   DateTime           @updatedAt
+  user                        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  energySite                  EnergySite         @relation(fields: [energySiteId], references: [id], onDelete: Cascade)
+  analysisRun                 EnergyAnalysisRun? @relation(fields: [analysisRunId], references: [id], onDelete: SetNull)
+  payments                    Payment[]
+
+  @@index([userId, status, validUntil])
+  @@index([energySiteId, createdAt])
+  @@index([analysisRunId])
+  @@map("service_offer")
+  @@schema("payment")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELED
+
+  @@schema("payment")
+}
+
+model Invoice {
+  id               String        @id @default(cuid())
+  number           String        @unique
+  userId           Int
+  paymentId        String?
+  status           InvoiceStatus @default(ISSUED)
+  currency         String        @default("CZK")
+  subtotalMinor    Int
+  vatMinor         Int           @default(0)
+  totalMinor       Int
+  sellerSnapshot   Json
+  customerSnapshot Json
+  issuedAt         DateTime      @default(now())
+  dueAt            DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  user             User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  payment          Payment?      @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  items            InvoiceItem[]
+
+  @@index([userId, issuedAt])
+  @@map("invoice")
+  @@schema("payment")
+}
+
+model InvoiceItem {
+  id             Int     @id @default(autoincrement())
+  invoiceId      String
+  description    String
+  quantity       Int     @default(1)
+  unitPriceMinor Int
+  vatRate        Int     @default(0)
+  totalMinor     Int
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_item")
+  @@schema("payment")
+}
+
+model InvoiceCounter {
+  year      Int      @id
+  sequence  Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("invoice_counter")
+  @@schema("payment")
+}
+
+model Founder {
+  id          Int      @id @default(autoincrement())
+  name        String
+  title       String?
+  bio         String?  @db.Text
+  photoUrl    String?
+  linkedInUrl String?
+  email       String?
+  published   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([published, sortOrder])
+  @@map("founder")
+  @@schema("content")
+}
+
+model ReferenceProject {
+  id          Int      @id @default(autoincrement())
+  name        String
+  slug        String   @unique
+  description String?  @db.Text
+  imageUrl    String?
+  url         String?
+  location    String?
+  published   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([published, sortOrder])
+  @@map("reference_project")
+  @@schema("content")
+}
+
+model SiteSettings {
+  id                Int      @id @default(1)
+  metaPixelId       String?
+  metaPixelEnabled  Boolean  @default(false)
+  analyticsEnabled  Boolean  @default(true)
+  consultationLead  String?
+  contactEmail      String?
+  sellerCompanyName String   @default("Spottex Energy s.r.o.")
+  sellerCompanyId   String?
+  sellerVatId       String?
+  sellerAddress     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("site_settings")
+  @@schema("content")
+}
+
+model BlogPost {
+  id             Int       @id @default(autoincrement())
+  slug           String    @unique
+  title          String
+  excerpt        String?
+  content        String    @db.Text
+  coverUrl       String?
+  seoTitle       String?
+  seoDescription String?
+  published      Boolean   @default(false)
+  publishedAt    DateTime?
+  authorId       Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  author         User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([published, publishedAt])
+  @@map("blog_post")
+  @@schema("content")
+}
+
+enum ConsentCategory {
+  ANALYTICS
+  MARKETING
+
+  @@schema("analytics")
+}
+
+model ConsentRecord {
+  id        String          @id @default(cuid())
+  sessionId String
+  userId    Int?
+  category  ConsentCategory
+  granted   Boolean
+  version   String
+  createdAt DateTime        @default(now())
+
+  @@index([sessionId, createdAt])
+  @@map("consent_record")
+  @@schema("analytics")
+}
+
+model AnalyticsEvent {
+  id               BigInt   @id @default(autoincrement())
+  type             String
+  path             String?
+  sessionId        String
+  userId           Int?
+  deduplicationKey String?  @unique
+  properties       Json     @default("{}")
+  occurredAt       DateTime @default(now())
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([type, occurredAt])
+  @@index([sessionId, occurredAt])
+  @@index([userId, occurredAt])
+  @@map("analytics_event")
+  @@schema("analytics")
+}
+
+enum ConsultationSlotStatus {
+  OPEN
+  HELD
+  BOOKED
+  BLOCKED
+  CANCELED
+
+  @@schema("consultation")
+}
+
+enum ConsultationBookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  EXPIRED
+  COMPLETED
+  NO_SHOW
+
+  @@schema("consultation")
+}
+
+model ConsultationSlot {
+  id               Int                    @id @default(autoincrement())
+  hostUserId       Int
+  startUtc         DateTime
+  endUtc           DateTime
+  status           ConsultationSlotStatus @default(OPEN)
+  holdExpiresAt    DateTime?
+  googleCalendarId String?
+  googleEventId    String?
+  meetUrl          String?
+  timezone         String                 @default("Europe/Prague")
+  metadata         Json                   @default("{}")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  host             User                   @relation(fields: [hostUserId], references: [id], onDelete: Cascade)
+  bookings         ConsultationBooking[]
+
+  @@unique([hostUserId, startUtc])
+  @@index([hostUserId, status, startUtc])
+  @@index([status, startUtc])
+  @@map("consultation_slot")
+  @@schema("consultation")
+}
+
+model ConsultationBooking {
+  id                   Int                       @id @default(autoincrement())
+  slotId               Int
+  guestName            String?
+  guestEmail           String
+  guestPhone           String?
+  note                 String?
+  status               ConsultationBookingStatus @default(PENDING)
+  manageTokenHash      String                    @unique
+  manageTokenExpiresAt DateTime
+  verifyTokenHash      String                    @unique
+  emailVerifiedAt      DateTime?
+  calendarRevision     Int                       @default(0)
+  consentAt            DateTime?
+  clientIpHash         String?
+  metadata             Json                      @default("{}")
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  slot                 ConsultationSlot          @relation(fields: [slotId], references: [id], onDelete: Restrict)
+
+  @@index([slotId, status])
+  @@index([guestEmail, createdAt])
+  @@index([status, createdAt])
+  @@map("consultation_booking")
+  @@schema("consultation")
+}
+
+model ConsultationHostCalendar {
+  id                    Int       @id @default(autoincrement())
+  hostUserId            Int       @unique
+  googleEmail           String?
+  encryptedAccessToken  String?   @db.Text
+  encryptedRefreshToken String?   @db.Text
+  tokenExpiresAt        DateTime?
+  maskCalendarIds       String[]  @default([])
+  targetCalendarId      String?
+  autoMeet              Boolean   @default(true)
+  timezone              String    @default("Europe/Prague")
+  targetSlotsPerWeek    Int       @default(10)
+  metadata              Json      @default("{}")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  host                  User      @relation(fields: [hostUserId], references: [id], onDelete: Cascade)
+
+  @@map("consultation_host_calendar")
+  @@schema("consultation")
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+
+  @@schema("jobs")
+}
+
+model ScheduledJob {
+  id             String    @id @default(cuid())
+  type           String
+  idempotencyKey String    @unique
+  payload        Json      @default("{}")
+  status         JobStatus @default(PENDING)
+  runAt          DateTime
+  attempts       Int       @default(0)
+  lockedAt       DateTime?
+  lastError      String?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@map("scheduled_job")
+  @@schema("jobs")
+}
+
+model EmailOutbox {
+  id             String    @id @default(cuid())
+  idempotencyKey String    @unique
+  toEmail        String
+  subject        String
+  textBody       String    @db.Text
+  htmlBody       String?   @db.Text
+  status         JobStatus @default(PENDING)
+  attempts       Int       @default(0)
+  sendAt         DateTime  @default(now())
+  sentAt         DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, sendAt])
+  @@map("email_outbox")
+  @@schema("jobs")
+}
+
+model RateLimitBucket {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime
+  expiresAt   DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("rate_limit_bucket")
+  @@schema("jobs")
+}
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  actorUserId Int?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_log")
+  @@schema("jobs")
+}
