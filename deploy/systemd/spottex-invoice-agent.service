@@ -1,0 +1,18 @@
+[Unit]
+Description=SpotTEX review-only invoice extraction agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=spottex
+Group=spottex
+WorkingDirectory=/srv/spottex/current
+EnvironmentFile=/etc/spottex/invoice-agent.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env npm run invoice:agent
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077

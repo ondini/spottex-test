@@ -1,0 +1,12 @@
+[Unit]
+Description=Run SpotTEX catalog draft agent weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 04:15:00 Europe/Prague
+RandomizedDelaySec=45m
+Persistent=true
+Unit=spottex-catalog-agent.service
+
+[Install]
+WantedBy=timers.target
+

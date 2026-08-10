@@ -1,0 +1,54 @@
+{
+  "candidates": [
+    {
+      "kind": "SOURCE",
+      "companyCode": "CEZ_PRODEJ",
+      "companyName": "ČEZ Prodej, a.s.",
+      "title": "Elektřina pro soláry na 1 rok – od 1. 5. 2026",
+      "sourceUrl": "https://www.cez.cz/file/edee/ceniky/moo_ele_cez_pro_solary_na_1_rok_01052026_012026.pdf",
+      "validFrom": "2026-05-01T00:00:00.000Z",
+      "validTo": null,
+      "dataJson": "{}"
+    },
+    {
+      "kind": "SOURCE",
+      "companyCode": "CEZ_PRODEJ",
+      "companyName": "ČEZ Prodej, a.s.",
+      "title": "Výkup elektřiny v tržním režimu bez licence – 2026",
+      "sourceUrl": "https://www.cez.cz/webpublic/file/edee/2025/10/moo_ee_vykup_ee_v_trznim-rezimu_bez-licence.pdf",
+      "validFrom": "2026-01-01T00:00:00.000Z",
+      "validTo": null,
+      "dataJson": "{}"
+    },
+    {
+      "kind": "SOURCE",
+      "companyCode": "EON_ENERGIE",
+      "companyName": "E.ON Energie, a.s.",
+      "title": "Variant PRO na 2 roky 3/26 – distribuční území ČEZ",
+      "sourceUrl": "https://www.eon.cz/getmedia/PriceLists/Domacnosti/Elektrina/2026/Akvizice/ceniky_3_26/cenik--variant--pro--na--2--roky--3_26-----distribucni--uzemi--cez.pdf",
+      "validFrom": "2026-03-30T00:00:00.000Z",
+      "validTo": null,
+      "dataJson": "{}"
+    },
+    {
+      "kind": "SOURCE",
+      "companyCode": "EON_ENERGIE",
+      "companyName": "E.ON Energie, a.s.",
+      "title": "SimplePROvýroba – výkup FVE do 50 kW – 2026",
+      "sourceUrl": "https://www.eon.cz/getContentAsset/d9bf23f9-67c4-42e4-9ad9-c47e478534c7/dfc3d011-8f63-43f6-9ed8-4b444333a1d0/EON_Cenik_SimplePROvyroba_2026.pdf?language=cs-CZ",
+      "validFrom": "2026-01-01T00:00:00.000Z",
+      "validTo": "2027-01-01T00:00:00.000Z",
+      "dataJson": "{}"
+    },
+    {
+      "kind": "SOURCE",
+      "companyCode": "PRE",
+      "companyName": "Pražská energetika, a.s.",
+      "title": "PRE PROUD EKO 07/2026 – distribuční území ČEZ",
+      "sourceUrl": "https://www.pre.cz/cs/linky/dokumenty-ke-stazeni/cenik/elektrina/cez/moo/pre-proud-eko/",
+      "validFrom": "2026-07-01T00:00:00.000Z",
+      "validTo": null,
+      "dataJson": "{}"
+    }
+  ]
+}

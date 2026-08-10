@@ -1,0 +1,343 @@
+name: spottex-platform
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - spottex_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.5
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: migrator
+    environment:
+      DATABASE_URL: ${DATABASE_ADMIN_URL:?Set DATABASE_ADMIN_URL}
+      SPOTTEX_APP_DB_USER: ${POSTGRES_APP_USER:?Set POSTGRES_APP_USER}
+      SPOTTEX_APP_DB_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}
+      SPOTTEX_BACKUP_DB_USER: ${POSTGRES_BACKUP_USER:?Set POSTGRES_BACKUP_USER}
+      SPOTTEX_BACKUP_DB_PASSWORD: ${POSTGRES_BACKUP_PASSWORD:?Set POSTGRES_BACKUP_PASSWORD}
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npx prisma migrate deploy && npx tsx scripts/grant-db-role.ts"
+    restart: "no"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      APP_URL: ${APP_URL:?Set APP_URL}
+      AUTH_URL: ${AUTH_URL:?Set AUTH_URL}
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY}
+      INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:?Set INTERNAL_JOB_TOKEN}
+      DATABASE_URL: ${DATABASE_URL:?Set application DATABASE_URL}
+      DEV_AUTO_VERIFY_EMAIL: "false"
+      TRUST_PROXY_HEADERS: "true"
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-FREE}
+      FREE_ACCESS_MODE: ${FREE_ACCESS_MODE:-true}
+      NEXT_PUBLIC_FREE_ACCESS_MODE: ${NEXT_PUBLIC_FREE_ACCESS_MODE:-true}
+      GOPAY_API_URL: ${GOPAY_API_URL:-https://gate.gopay.cz/api}
+      GOPAY_CLIENT_ID: ${GOPAY_CLIENT_ID:-}
+      GOPAY_CLIENT_SECRET: ${GOPAY_CLIENT_SECRET:-}
+      GOPAY_GO_ID: ${GOPAY_GO_ID:-}
+      GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
+      GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
+      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-}
+      SPOTTEX_LEGACY_API_URL: ${SPOTTEX_LEGACY_API_URL:-}
+      SPOTTEX_LEGACY_FERNET_KEY: ${SPOTTEX_LEGACY_FERNET_KEY:-}
+      ALLOW_INSECURE_LEGACY_HTTP: ${ALLOW_INSECURE_LEGACY_HTTP:-false}
+      ENERGY_SYNC_INTERVAL_MINUTES: ${ENERGY_SYNC_INTERVAL_MINUTES:-5}
+      GRIDLINK_API_URL: ${GRIDLINK_API_URL:-}
+      GRIDLINK_API_TOKEN: ${GRIDLINK_API_TOKEN:-}
+      COSTS_INTERNAL_API_URL: ${COSTS_INTERNAL_API_URL:-}
+      COSTS_INTERNAL_API_KEY: ${COSTS_INTERNAL_API_KEY:-}
+      COSTS_CATALOG_SYNC_INTERVAL_MINUTES: ${COSTS_CATALOG_SYNC_INTERVAL_MINUTES:-360}
+      SPOTTEX_BACKEND_DATABASE_URL: ${SPOTTEX_BACKEND_DATABASE_URL:-}
+      MARKET_SYNC_INTERVAL_MINUTES: ${MARKET_SYNC_INTERVAL_MINUTES:-15}
+      META_CONVERSIONS_API_TOKEN: ${META_CONVERSIONS_API_TOKEN:-}
+      ANALYTICS_RETENTION_DAYS: ${ANALYTICS_RETENTION_DAYS:-395}
+      CONSENT_RETENTION_DAYS: ${CONSENT_RETENTION_DAYS:-1825}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-730}
+      CONSULTATION_PII_RETENTION_DAYS: ${CONSULTATION_PII_RETENTION_DAYS:-730}
+      EMAIL_OUTBOX_RETENTION_DAYS: ${EMAIL_OUTBOX_RETENTION_DAYS:-7}
+      FAILED_EMAIL_RETENTION_DAYS: ${FAILED_EMAIL_RETENTION_DAYS:-30}
+      ENERGY_INVOICE_RETENTION_DAYS: ${ENERGY_INVOICE_RETENTION_DAYS:-180}
+      ANALYSIS_SCENARIO_TIMEOUT_MS: ${ANALYSIS_SCENARIO_TIMEOUT_MS:-600000}
+      ANALYSIS_MAX_SOLVER_CALLS: ${ANALYSIS_MAX_SOLVER_CALLS:-600}
+      ANALYSIS_RUN_BUDGET_MS: ${ANALYSIS_RUN_BUDGET_MS:-2700000}
+      ANALYSIS_STALE_LOCK_MS: ${ANALYSIS_STALE_LOCK_MS:-3600000}
+      ANALYSIS_MAX_CONCURRENT_JOBS: ${ANALYSIS_MAX_CONCURRENT_JOBS:-1}
+      ANALYSIS_JOB_BATCH_LIMIT: ${ANALYSIS_JOB_BATCH_LIMIT:-1}
+      ENERGY_SUPPLIER_MODE: ${ENERGY_SUPPLIER_MODE:-COMPARISON_ONLY}
+      PUBLIC_MEDIA_HOSTS: ${PUBLIC_MEDIA_HOSTS:-spottex.cz,www.spottex.cz}
+    ports:
+      - "127.0.0.1:${SPOTTEX_PROD_PORT:-3005}:3004"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - costs_data
+      - spottex_backend_prod
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,uid=1001,gid=1001
+      - /app/.next/cache:size=128m,uid=1001,gid=1001
+    mem_limit: 1g
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  analysis-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: analysis-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set application DATABASE_URL}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY}
+      APP_URL: ${APP_URL:?Set APP_URL}
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ANALYSIS_SCENARIO_TIMEOUT_MS: ${ANALYSIS_SCENARIO_TIMEOUT_MS:-600000}
+      ANALYSIS_MAX_SOLVER_CALLS: ${ANALYSIS_MAX_SOLVER_CALLS:-600}
+      ANALYSIS_RUN_BUDGET_MS: ${ANALYSIS_RUN_BUDGET_MS:-2700000}
+      ANALYSIS_STALE_LOCK_MS: ${ANALYSIS_STALE_LOCK_MS:-3600000}
+      ANALYSIS_MAX_CONCURRENT_JOBS: ${ANALYSIS_MAX_CONCURRENT_JOBS:-1}
+      ANALYSIS_JOB_BATCH_LIMIT: ${ANALYSIS_JOB_BATCH_LIMIT:-1}
+      ANALYSIS_WORKER_POLL_MS: ${ANALYSIS_WORKER_POLL_MS:-5000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,uid=1001,gid=1001
+    mem_limit: 2g
+    cpus: 2
+
+  invoice-parser:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: invoice-parser
+    restart: unless-stopped
+    environment:
+      CODEX_HOME: /home/node/.codex
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      INVOICE_PARSER_PORT: "3010"
+      INVOICE_CODEX_TIMEOUT_MS: ${INVOICE_CODEX_TIMEOUT_MS:-480000}
+      INVOICE_MAX_DOCUMENT_BYTES: ${INVOICE_MAX_DOCUMENT_BYTES:-10485760}
+    volumes:
+      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE}:/home/node/.codex/auth.json:ro
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,uid=1000,gid=1000,mode=0700
+    mem_limit: 1g
+    cpus: 1
+
+  invoice-coordinator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: invoice-coordinator
+    restart: unless-stopped
+    network_mode: service:invoice-parser
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set application DATABASE_URL}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY}
+      ENERGY_INVOICE_AI_ENABLED: "true"
+      INVOICE_PARSER_URL: http://127.0.0.1:3010
+      INVOICE_AGENT_POLL_MS: ${INVOICE_AGENT_POLL_MS:-10000}
+      INVOICE_AGENT_TIMEOUT_MS: ${INVOICE_AGENT_TIMEOUT_MS:-600000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      invoice-parser:
+        condition: service_started
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,uid=1000,gid=1000,mode=0700
+    mem_limit: 512m
+    cpus: 0.5
+
+  jobs:
+    image: curlimages/curl:8.14.1
+    restart: unless-stopped
+    environment:
+      INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:?Set INTERNAL_JOB_TOKEN}
+    depends_on:
+      app:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - >-
+        while true; do
+          if test ! -f /tmp/.last-start; then date +%s > /tmp/.last-start; fi;
+          if curl -fsS --connect-timeout 5 --max-time 1800 -X POST
+          -H "Authorization: Bearer $${INTERNAL_JOB_TOKEN}"
+          http://app:3004/api/internal/jobs/run; then
+            date +%s > /tmp/.last-success;
+            rm -f /tmp/.last-start;
+          fi;
+          sleep 30;
+        done
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          now=$$(date +%s);
+          (test -f /tmp/.last-success && last=$$(cat /tmp/.last-success) &&
+          test $$((now - last)) -lt 2700) ||
+          (test -f /tmp/.last-start && started=$$(cat /tmp/.last-start) &&
+          test $$((now - started)) -lt 2100)
+      interval: 2m
+      timeout: 5s
+      retries: 3
+      start_period: 2m
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m
+    mem_limit: 64m
+    cpus: 0.25
+
+  db_backup:
+    build:
+      context: ..
+      dockerfile: Dockerfile.backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_BACKUP_USER:?Set POSTGRES_BACKUP_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_BACKUP_PASSWORD:?Set POSTGRES_BACKUP_PASSWORD}
+      BACKUP_ENCRYPTION_PASSPHRASE: ${BACKUP_ENCRYPTION_PASSPHRASE:?Set BACKUP_ENCRYPTION_PASSPHRASE}
+    volumes:
+      - spottex_backups:/backups
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - >-
+        set -o pipefail;
+        umask 077;
+        while true; do
+          target="/backups/spottex-$$(date +%Y%m%d-%H%M%S).dump.enc";
+          rm -f "$${target}.tmp";
+          if PGPASSWORD="$${POSTGRES_PASSWORD}" pg_dump -h db -U "$${POSTGRES_USER}"
+          -d "$${POSTGRES_DB}" -Fc |
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_ENCRYPTION_PASSPHRASE
+          -out "$${target}.tmp"; then
+            mv "$${target}.tmp" "$${target}";
+            date +%s > /backups/.last-success.tmp;
+            mv /backups/.last-success.tmp /backups/.last-success;
+            rm -f /backups/.last-failure;
+            delay=86400;
+          else
+            rm -f "$${target}.tmp";
+            date +%s > /backups/.last-failure.tmp;
+            mv /backups/.last-failure.tmp /backups/.last-failure;
+            delay=900;
+          fi;
+          find /backups -type f -name '*.dump.enc' -mtime +14 -delete;
+          sleep "$${delay}";
+        done
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -f /backups/.last-success &&
+          now=$$(date +%s) && last=$$(cat /backups/.last-success) &&
+          test "$${last}" -ge 1 && test "$${last}" -le "$${now}" &&
+          test $$((now - last)) -lt 93600 &&
+          { test ! -f /backups/.last-failure ||
+          { failure=$$(cat /backups/.last-failure) &&
+          test "$${failure}" -ge 1 && test "$${failure}" -lt "$${last}"; }; }
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 512m
+    cpus: 1.0
+
+volumes:
+  spottex_db:
+  spottex_backups:
+
+networks:
+  costs_data:
+    external: true
+    name: costs_data
+  spottex_backend_prod:
+    external: true
+    name: spottex_prod_net

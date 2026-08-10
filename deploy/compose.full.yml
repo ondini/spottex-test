@@ -1,0 +1,53 @@
+# Whole-system development stack: Next.js platform + Python energy backend.
+#
+# The two halves live in separate repositories. This file does not copy the
+# backend definition -- it includes the backend repository's own compose file,
+# so that repository stays the single owner of its services. Point
+# SPOTTEX_BACKEND_COMPOSE at your checkout if it is not in the default place.
+#
+# DO NOT start this alongside a separately running `spottex_backend` project.
+# Both would bind 2086/5434 and both would run control_broadcaster and the
+# inverter workers against the same real inverters. Stop the standalone
+# backend project first:
+#
+#   docker compose -p spottex_backend -f "$SPOTTEX_BACKEND_COMPOSE" down
+#   docker compose --env-file ../Secrets/spottex.development.env \
+#     -f compose.full.yml up -d
+#
+# Validate interpolation without starting anything:
+#
+#   docker compose --env-file ../Secrets/spottex.development.env \
+#     -f compose.full.yml config -q
+
+name: spottex-full
+
+include:
+  - path: ${SPOTTEX_BACKEND_COMPOSE:-/home/anna/Documents/spottex_backend/docker-compose.yml}
+  - path: compose.dev.yml
+
+services:
+  # In the merged project the backend is a peer service, not a separately
+  # deployed stack, so reach it over the project network by service name
+  # instead of through the host gateway and published ports.
+  app:
+    environment:
+      SPOTTEX_LEGACY_API_URL: http://web:2086
+      SPOTTEX_BACKEND_DATABASE_URL: postgresql://spottex:secret@db:5432/spottex
+    depends_on:
+      web-db:
+        condition: service_healthy
+      db:
+        condition: service_started
+      web:
+        condition: service_started
+
+networks:
+  # compose.dev.yml joins the standalone backend project's network to reach it
+  # across projects. Here the backend is a peer service on this project's own
+  # network, so that alias has nothing to attach to -- and leaving it external
+  # would make `up` fail with "network spottex_backend_default not found"
+  # exactly when the standalone project is correctly stopped. Redeclare it as
+  # a project-local network; app reaches the backend over `default`.
+  spottex_backend:
+    name: spottex-full_backend_unused
+    external: false

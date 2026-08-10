@@ -1,0 +1,188 @@
+name: spottex-platform-dev
+
+services:
+  # Named web-db, not db: deploy/compose.full.yml merges this file with the
+  # backend stack, which defines its own `db` (postgres:17). Compose include
+  # deep-merges same-named services, so a generic name here would silently
+  # produce one container carrying both port publishes and the backend's
+  # credentials -- and point Prisma migrations at the backend database.
+  web-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: spottex
+      POSTGRES_USER: spottex
+      POSTGRES_PASSWORD: spottex_dev
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - spottex_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spottex -d spottex"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1026:1025"
+      - "127.0.0.1:8026:8025"
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
+      APP_URL: http://localhost:3004
+      AUTH_URL: http://localhost:3004
+      AUTH_SECRET: ${AUTH_SECRET:?Use --env-file Secrets/spottex.development.env}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
+      INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:?Use --env-file Secrets/spottex.development.env}
+      DEV_AUTO_VERIFY_EMAIL: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      EMAIL_FROM: Spottex <noreply@spottex.local>
+      PAYMENT_PROVIDER: MOCK
+      FREE_ACCESS_MODE: ${FREE_ACCESS_MODE:-true}
+      NEXT_PUBLIC_FREE_ACCESS_MODE: ${NEXT_PUBLIC_FREE_ACCESS_MODE:-true}
+      SPOTTEX_LEGACY_API_URL: ${SPOTTEX_LEGACY_API_URL:-http://host.docker.internal:2086}
+      SPOTTEX_LEGACY_FERNET_KEY: ${SPOTTEX_LEGACY_FERNET_KEY:-}
+      ENERGY_SYNC_INTERVAL_MINUTES: "5"
+      GRIDLINK_API_URL: http://host.docker.internal:45992
+      GRIDLINK_API_TOKEN: ${GRIDLINK_API_TOKEN:-}
+      COSTS_INTERNAL_API_URL: ${COSTS_INTERNAL_API_URL:-http://costs-api:3012}
+      COSTS_INTERNAL_API_KEY: ${COSTS_INTERNAL_API_KEY:-}
+      COSTS_CATALOG_SYNC_INTERVAL_MINUTES: ${COSTS_CATALOG_SYNC_INTERVAL_MINUTES:-360}
+      SPOTTEX_BACKEND_DATABASE_URL: ${SPOTTEX_BACKEND_DATABASE_URL:-postgresql://spottex:secret@spottex_backend-db-1:5432/spottex}
+      MARKET_SYNC_INTERVAL_MINUTES: ${MARKET_SYNC_INTERVAL_MINUTES:-15}
+      GOOGLE_CALENDAR_CLIENT_ID: ${GOOGLE_CALENDAR_CLIENT_ID:-}
+      GOOGLE_CALENDAR_CLIENT_SECRET: ${GOOGLE_CALENDAR_CLIENT_SECRET:-}
+      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:3004/api/admin/google-calendar/callback}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${SPOTTEX_DEV_PORT:-3004}:3004"
+    volumes:
+      - ..:/app
+      - spottex_dev_node_modules:/app/node_modules
+    depends_on:
+      web-db:
+        condition: service_healthy
+    networks:
+      - default
+      - costs_data
+      - spottex_backend
+    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run dev"
+
+  analysis-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
+      APP_URL: http://localhost:3004
+      EMAIL_FROM: Spottex <noreply@spottex.local>
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      ANALYSIS_WORKER_POLL_MS: "5000"
+      ANALYSIS_SCENARIO_TIMEOUT_MS: "600000"
+      ANALYSIS_MAX_SOLVER_CALLS: "600"
+      ANALYSIS_MAX_CONCURRENT_JOBS: "3"
+      ANALYSIS_JOB_BATCH_LIMIT: "1"
+    volumes:
+      - ..:/app
+      - spottex_dev_analysis_node_modules:/app/node_modules
+    depends_on:
+      web-db:
+        condition: service_healthy
+    command: node --conditions=react-server --import tsx scripts/analysis-worker.ts
+
+  invoice-parser:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: invoice-parser
+    restart: unless-stopped
+    environment:
+      CODEX_HOME: /home/node/.codex
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      INVOICE_PARSER_PORT: "3010"
+      INVOICE_CODEX_TIMEOUT_MS: "480000"
+      INVOICE_MAX_DOCUMENT_BYTES: "10485760"
+    volumes:
+      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in Secrets/spottex.development.env}:/home/node/.codex/auth.json:ro
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,uid=1000,gid=1000,mode=0700
+    mem_limit: 1g
+    cpus: 1
+
+  invoice-coordinator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: invoice-coordinator
+    restart: unless-stopped
+    network_mode: service:invoice-parser
+    environment:
+      DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
+      ENERGY_INVOICE_AI_ENABLED: "true"
+      INVOICE_PARSER_URL: http://127.0.0.1:3010
+      INVOICE_AGENT_POLL_MS: "10000"
+      INVOICE_AGENT_TIMEOUT_MS: "600000"
+    depends_on:
+      web-db:
+        condition: service_healthy
+      invoice-parser:
+        condition: service_started
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,uid=1000,gid=1000,mode=0700
+    mem_limit: 512m
+    cpus: 0.5
+
+  jobs:
+    image: curlimages/curl:8.14.1
+    restart: unless-stopped
+    environment:
+      INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:?Use --env-file Secrets/spottex.development.env}
+    depends_on:
+      - app
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          curl -fsS -X POST \
+          -H "Authorization: Bearer $${INTERNAL_JOB_TOKEN}" \
+          http://app:3004/api/internal/jobs/run || true;
+          sleep 30;
+        done
+
+volumes:
+  spottex_dev_db:
+  spottex_dev_node_modules:
+  spottex_dev_analysis_node_modules:
+
+networks:
+  costs_data:
+    external: true
+    name: costs_data
+  spottex_backend:
+    external: true
+    name: spottex_backend_default

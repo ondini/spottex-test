@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "billingPeriodFrom", "billingPeriodTo", "values", "fieldEvidence", "warnings"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "energy-invoice-ai-v1" },
+    "billingPeriodFrom": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "billingPeriodTo": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ean", "address", "distributorCode", "distributionTariffCode", "phases", "mainFuseA", "buyPricingMode", "sellPricingMode", "currentSupplierName", "currentProductName", "monthlySupplierFeeCzk", "fixedBuyPriceCzkKwh", "fixedSellPriceCzkKwh", "spotBuyFeeCzkKwh", "spotSellFeeCzkKwh", "fixedPriceValidUntil", "hdoStatus"],
+      "properties": {
+        "ean": { "type": ["string", "null"] },
+        "address": { "type": ["string", "null"] },
+        "distributorCode": { "type": ["string", "null"] },
+        "distributionTariffCode": { "type": ["string", "null"] },
+        "phases": { "type": ["integer", "null"], "minimum": 1, "maximum": 3 },
+        "mainFuseA": { "type": ["number", "null"] },
+        "buyPricingMode": { "type": ["string", "null"], "enum": ["FIX", "SPOT", "OTHER", null] },
+        "sellPricingMode": { "type": ["string", "null"], "enum": ["FIX", "SPOT", "OTHER", null] },
+        "currentSupplierName": { "type": ["string", "null"] },
+        "currentProductName": { "type": ["string", "null"] },
+        "monthlySupplierFeeCzk": { "type": ["number", "null"] },
+        "fixedBuyPriceCzkKwh": { "type": ["number", "null"] },
+        "fixedSellPriceCzkKwh": { "type": ["number", "null"] },
+        "spotBuyFeeCzkKwh": { "type": ["number", "null"] },
+        "spotSellFeeCzkKwh": { "type": ["number", "null"] },
+        "fixedPriceValidUntil": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "hdoStatus": { "type": ["string", "null"], "enum": ["EXACT", "USER_CONFIRMED", "MODELED", "MISSING", null] }
+      }
+    },
+    "fieldEvidence": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "confidence", "evidence"],
+        "properties": {
+          "field": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "MISSING"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "warnings": { "type": "array", "maxItems": 30, "items": { "type": "string" } }
+  }
+}
