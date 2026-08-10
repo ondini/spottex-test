@@ -1,0 +1,770 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f4faec;
+  --color-brand-100: #e6f4d7;
+  --color-brand-200: #cde9b2;
+  --color-brand-300: #addb85;
+  --color-brand-400: #8acb5a;
+  --color-brand-500: #82c651;
+  --color-brand-600: #59a43c;
+  --color-brand-700: #438033;
+  --color-brand-800: #37652e;
+  --color-brand-900: #2f5429;
+  --color-success-50: #ecfdf3;
+  --color-success-600: #039855;
+  --color-warning-50: #fffaeb;
+  --color-warning-600: #dc6803;
+  --color-error-50: #fef3f2;
+  --color-error-600: #d92d20;
+}
+
+:root {
+  color-scheme: light;
+  --app-dark: #09121f;
+}
+
+body {
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #101828;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-card {
+  border: 1px solid #eaecf0;
+  border-radius: 1rem;
+  background: white;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+}
+
+.app-input {
+  width: 100%;
+  border: 1px solid #d0d5dd;
+  border-radius: 0.75rem;
+  background: white;
+  padding: 0.7rem 0.85rem;
+  color: #101828;
+  outline: none;
+}
+
+.app-input:focus {
+  border-color: #82c651;
+  box-shadow: 0 0 0 3px rgb(130 198 81 / 0.16);
+}
+
+.app-button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  background: #82c651;
+  padding: 0.7rem 1.1rem;
+  color: white;
+  font-weight: 650;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.app-button:hover {
+  background: #59a43c;
+  transform: translateY(-1px);
+}
+
+.app-button-secondary {
+  background: white;
+  color: #344054;
+  border: 1px solid #d0d5dd;
+}
+
+.app-button-danger {
+  background: #d92d20;
+}
+
+/* Cookie consent is intentionally outside Tailwind layers. The migrated
+   landing page still contains an unlayered legacy reset for every element and
+   button; these scoped classes therefore keep the dialog consistent on every
+   route without leaking styles back into the page. */
+.spottex-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: rgb(2 6 23 / 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.spottex-consent-dialog {
+  position: relative;
+  width: min(100%, 560px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.72);
+  border-radius: 28px;
+  background: #fff;
+  color: #101828;
+  box-shadow: 0 30px 90px rgb(15 23 42 / 0.38);
+}
+
+.spottex-consent-accent {
+  width: 100%;
+  height: 6px;
+  background: #82c651;
+}
+
+.spottex-consent-content {
+  padding: 32px;
+}
+
+.spottex-consent-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 16px;
+  background: #f4faec;
+  color: #438033;
+}
+
+.spottex-consent-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.spottex-consent-eyebrow {
+  margin-top: 20px;
+  color: #438033;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.spottex-consent-title {
+  margin-top: 8px;
+  padding-right: 32px;
+  color: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(25px, 5vw, 32px);
+  font-weight: 750;
+  line-height: 1.18;
+  letter-spacing: -0.035em;
+}
+
+.spottex-consent-description {
+  margin-top: 12px;
+  color: #475467;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: normal;
+}
+
+.spottex-consent-error {
+  margin-top: 16px;
+  border: 1px solid #fee4e2;
+  border-radius: 12px;
+  background: #fef3f2;
+  padding: 12px 16px;
+  color: #b42318;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.spottex-consent-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.spottex-consent-secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.spottex-consent-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  transition: 150ms ease;
+}
+
+.spottex-consent-button--primary {
+  border: 1px solid #82c651;
+  background: #82c651;
+  color: #fff;
+}
+
+.spottex-consent-button--primary:hover {
+  border-color: #59a43c;
+  background: #59a43c;
+}
+
+.spottex-consent-button--secondary {
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #344054;
+}
+
+.spottex-consent-button--secondary:hover {
+  border-color: #98a2b3;
+  background: #f8fafc;
+}
+
+.spottex-consent-button:disabled,
+.spottex-consent-close:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.spottex-consent-footnote {
+  margin-top: 20px;
+  color: #98a2b3;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: normal;
+  text-align: center;
+}
+
+.spottex-consent-link {
+  color: #475467;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: #d0d5dd;
+  text-underline-offset: 2px;
+}
+
+.spottex-consent-link:hover {
+  color: #438033;
+}
+
+.spottex-consent-close {
+  position: absolute;
+  top: 18px;
+  right: 16px;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #98a2b3;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.spottex-consent-close:hover {
+  background: #f2f4f7;
+  color: #344054;
+}
+
+@media (max-width: 520px) {
+  .spottex-consent-overlay {
+    padding: 16px;
+  }
+
+  .spottex-consent-dialog {
+    max-height: calc(100dvh - 32px);
+    border-radius: 24px;
+  }
+
+  .spottex-consent-content {
+    padding: 24px;
+  }
+
+  .spottex-consent-secondary-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Public legal pages live next to the legacy landing CSS. Keep this block
+   deliberately scoped so the landing reset cannot flatten the document. */
+.legal-site,
+.legal-site * {
+  box-sizing: border-box;
+}
+
+.legal-site {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 82% 2%, rgba(105, 189, 69, 0.16), transparent 25rem),
+    #f6f8f3;
+  color: #182014;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.legal-site a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.legal-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 82px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 32px;
+}
+
+.legal-brand {
+  display: inline-flex;
+  align-items: center;
+  color: #10150e;
+  font-size: 31px;
+  font-weight: 850;
+  letter-spacing: -0.075em;
+  line-height: 1;
+}
+
+.legal-brand span {
+  color: #65b842;
+}
+
+.legal-topbar-links {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  color: #4d5848;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.legal-topbar-links a:hover {
+  color: #3e862c;
+}
+
+.legal-topbar-links .legal-login-link {
+  padding: 12px 20px;
+  border-radius: 4px;
+  background: #65b842;
+  color: #fff;
+}
+
+.legal-main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 32px 110px;
+}
+
+.legal-hero {
+  max-width: 890px;
+  padding: 78px 0 68px;
+}
+
+.legal-eyebrow,
+.legal-hero .legal-eyebrow {
+  margin: 0 0 20px;
+  color: #4c992f;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.legal-hero h1 {
+  max-width: 880px;
+  margin: 0;
+  color: #12170f;
+  font-size: clamp(43px, 6vw, 76px);
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+.legal-hero .legal-lead {
+  max-width: 760px;
+  margin: 28px 0 0;
+  color: #5f695b;
+  font-size: 18px;
+  font-weight: 450;
+  letter-spacing: -0.015em;
+  line-height: 1.7;
+}
+
+.legal-hero .legal-effective {
+  display: inline-flex;
+  margin: 28px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #dce6d7;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  color: #778173;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.legal-layout {
+  display: block;
+}
+
+.legal-layout--with-navigation {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 62px;
+  align-items: start;
+}
+
+.legal-aside {
+  position: sticky;
+  top: 24px;
+  padding: 22px;
+  border: 1px solid #dce6d7;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 35px rgba(33, 54, 25, 0.06);
+  backdrop-filter: blur(14px);
+}
+
+.legal-aside nav > p {
+  margin: 0 0 14px;
+  color: #838d7e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.legal-aside ol {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legal-aside li {
+  margin: 0;
+}
+
+.legal-aside li a {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  color: #53604e;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.legal-aside li a span {
+  color: #9aaa93;
+  font-variant-numeric: tabular-nums;
+}
+
+.legal-aside li a:hover {
+  background: #eff6ea;
+  color: #377b26;
+}
+
+.legal-cookie-settings {
+  width: 100%;
+  margin-top: 18px;
+  padding: 11px 13px;
+  border: 1px solid #d6dfd2;
+  border-radius: 9px;
+  background: #fff;
+  color: #53604e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.legal-cookie-settings:hover {
+  border-color: #65b842;
+  color: #377b26;
+}
+
+.legal-document {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+
+.legal-document section {
+  scroll-margin-top: 32px;
+  padding: 40px 44px;
+  border: 1px solid #e1e8dd;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 45px rgba(33, 54, 25, 0.055);
+}
+
+.legal-document .legal-section-number {
+  margin: 0 0 14px;
+  color: #62ad44;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+}
+
+.legal-document h2 {
+  margin: 0 0 22px;
+  color: #172013;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 680;
+  letter-spacing: -0.04em;
+  line-height: 1.12;
+  text-align: left;
+}
+
+.legal-document h3 {
+  margin: 0;
+  color: #1e291a;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.legal-document p,
+.legal-document li {
+  color: #5a6555;
+  font-size: 15px;
+  font-weight: 430;
+  letter-spacing: -0.008em;
+  line-height: 1.78;
+}
+
+.legal-document p {
+  margin: 14px 0 0;
+}
+
+.legal-document p:first-of-type {
+  margin-top: 0;
+}
+
+.legal-document strong {
+  color: #293524;
+  font-weight: 720;
+}
+
+.legal-document a {
+  color: #3f8d2d;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: #a9cca0;
+  text-underline-offset: 3px;
+}
+
+.legal-document ul {
+  display: grid;
+  gap: 9px;
+  margin: 18px 0 0;
+  padding-left: 22px;
+}
+
+.legal-contact-card,
+.legal-purpose-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.legal-contact-card > div,
+.legal-purpose-grid article {
+  padding: 20px;
+  border: 1px solid #e2e9de;
+  border-radius: 14px;
+  background: #f8faf6;
+}
+
+.legal-contact-card span,
+.legal-purpose-grid article > span {
+  display: block;
+  margin-bottom: 8px;
+  color: #82907c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.legal-contact-card a {
+  font-size: 14px;
+}
+
+.legal-purpose-grid article p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.legal-callout {
+  margin-top: 22px;
+  padding: 22px 24px;
+  border-left: 4px solid #65b842;
+  border-radius: 0 14px 14px 0;
+  background: #eef7e9;
+}
+
+.legal-callout p {
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.legal-table-wrap {
+  overflow-x: auto;
+  margin-top: 22px;
+  border: 1px solid #e1e8dd;
+  border-radius: 14px;
+}
+
+.legal-document table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.legal-document th,
+.legal-document td {
+  padding: 15px 16px;
+  border-bottom: 1px solid #e8eee5;
+  color: #5a6555;
+  text-align: left;
+  vertical-align: top;
+}
+
+.legal-document th {
+  background: #f6f9f4;
+  color: #35432f;
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legal-document tr:last-child td {
+  border-bottom: 0;
+}
+
+.legal-footer {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr;
+  gap: 36px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 32px;
+  border-top: 1px solid #dce6d7;
+}
+
+.legal-footer > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.legal-footer p,
+.legal-footer a:not(.legal-brand) {
+  margin: 0;
+  color: #6f7b69;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.legal-footer a:not(.legal-brand):hover {
+  color: #3f8d2d;
+}
+
+@media (max-width: 920px) {
+  .legal-layout--with-navigation {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .legal-aside {
+    position: relative;
+    top: auto;
+  }
+
+  .legal-aside ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .legal-topbar {
+    min-height: 70px;
+    padding: 14px 18px;
+  }
+
+  .legal-topbar-links a:not(.legal-login-link) {
+    display: none;
+  }
+
+  .legal-main {
+    padding: 20px 16px 70px;
+  }
+
+  .legal-hero {
+    padding: 48px 4px 44px;
+  }
+
+  .legal-hero h1 {
+    font-size: 43px;
+  }
+
+  .legal-hero .legal-lead {
+    font-size: 16px;
+  }
+
+  .legal-aside ol,
+  .legal-contact-card,
+  .legal-purpose-grid,
+  .legal-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .legal-document section {
+    padding: 28px 22px;
+    border-radius: 18px;
+  }
+
+  .legal-document p,
+  .legal-document li {
+    font-size: 14px;
+  }
+
+  .legal-footer {
+    padding: 40px 20px;
+  }
+}
