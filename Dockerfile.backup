@@ -1,0 +1,10 @@
+FROM postgres:16-alpine
+
+RUN apk add --no-cache openssl \
+  && mkdir -p /backups \
+  && chown postgres:postgres /backups
+
+COPY --chmod=755 scripts/backup-entrypoint.sh /usr/local/bin/spottex-backup-entrypoint
+
+USER postgres
+ENTRYPOINT ["spottex-backup-entrypoint"]

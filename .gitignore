@@ -8,8 +8,25 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.local/
+*.tsbuildinfo
 dist
 dist-ssr
+.next
+.next-build
+coverage
+playwright-report
+test-results
+.env
+.env.*
+!.env.example
+!deploy/env.production.example
+backups
+/Secrets/*.env
+/backend-customer-journey/
+
+# Read-only Flutter production artifact used only as a migration reference.
+/legacy-flutter-app/
 *.local
 
 # Editor directories and files

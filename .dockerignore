@@ -1,0 +1,13 @@
+.git
+.next
+.next-build
+node_modules
+dist
+legacy-flutter-app
+backend-customer-journey
+backups
+coverage
+playwright-report
+test-results
+.env*
+!.env.example
