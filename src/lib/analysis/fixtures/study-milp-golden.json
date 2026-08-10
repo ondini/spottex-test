@@ -1,0 +1,59 @@
+{
+  "source": {
+    "implementation": "/home/anna/Documents/spottex_backend/optimization/analysis_tools.py",
+    "sha256": "08c4bd0985a206b2e10eaa0731b7ffcae55e23f129daa11845a8270ab5b95361",
+    "solver": "OR-Tools CBC 9.15.6755",
+    "exportedAt": "2026-07-21",
+    "notes": "Synthetic, deterministic physical flow cases exported from minimize_power_expenses with all safety deltas set to zero. Production regression still requires anonymized annual datasets."
+  },
+  "cases": [
+    {
+      "name": "arbitrage",
+      "productionKwh": [0, 0, 0, 0],
+      "consumptionKwh": [0, 0, 0, 5],
+      "buyCzkKwh": [1, 4, 4, 8],
+      "sellCzkKwh": [0.5, 0.5, 0.5, 0.5],
+      "batteryCapacityKwh": 10,
+      "initialSocKwh": 0,
+      "expected": {
+        "importKwh": [5, 0, 0, 0],
+        "exportKwh": [0, 0, 0, 0],
+        "chargeKwh": [5, 0, 0, 0],
+        "dischargeKwh": [0, 0, 0, 5],
+        "socKwh": [5, 5, 5, 0]
+      }
+    },
+    {
+      "name": "solar_shift",
+      "productionKwh": [5, 0],
+      "consumptionKwh": [0, 5],
+      "buyCzkKwh": [4, 4],
+      "sellCzkKwh": [0.5, 0.5],
+      "batteryCapacityKwh": 10,
+      "initialSocKwh": 0,
+      "expected": {
+        "importKwh": [0, 0],
+        "exportKwh": [0, 0],
+        "chargeKwh": [5, 0],
+        "dischargeKwh": [0, 5],
+        "socKwh": [5, 0]
+      }
+    },
+    {
+      "name": "negative_no_battery",
+      "productionKwh": [0],
+      "consumptionKwh": [0],
+      "buyCzkKwh": [-2],
+      "sellCzkKwh": [3],
+      "batteryCapacityKwh": 0,
+      "initialSocKwh": 0,
+      "expected": {
+        "importKwh": [0],
+        "exportKwh": [0],
+        "chargeKwh": [0],
+        "dischargeKwh": [0],
+        "socKwh": [0]
+      }
+    }
+  ]
+}
