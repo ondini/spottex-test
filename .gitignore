@@ -23,6 +23,10 @@ test-results
 !deploy/env.production.example
 backups
 /Secrets/*.env
+
+# Superseded by spottex_web_v2.*; kept on disk only so the old hero clip is not
+# lost, and deliberately not committed because nothing references it.
+/public/spottex_web.mp4
 /backend-customer-journey/
 
 # Read-only Flutter production artifact used only as a migration reference.

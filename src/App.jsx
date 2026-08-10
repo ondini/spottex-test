@@ -1,12 +1,29 @@
-import { useState } from 'react'
-import './index.css'
+'use client'
+
+import { useEffect, useState } from 'react'
+import MiniConsultationCalendar from './components/marketing/MiniConsultationCalendar'
 
 const LOGO_URL = 'https://framerusercontent.com/images/umHNWFzfNiwMjUFM1F5u3PfOa4U.png'
-const PHONE_URL = 'https://framerusercontent.com/images/ITU2wGDMswuT7warFNMXal9AOjQ.png'
 const CLOUD_URL = 'https://framerusercontent.com/images/nj4J6jsjd5DicG7zzMA3Gvj0Bg.webp'
 const CHART_URL = 'https://framerusercontent.com/images/fjm1CJNaRnlFCCezhLqox2Tbibk.jpg'
 const APP_URL = 'https://framerusercontent.com/images/BXcKAWwzIpif2PewHLzr0dQftxM.webp'
-const VIDEO_URL = 'https://framerusercontent.com/assets/V9SkoRvPZYT1Y9hArxh9cYxdQLA.mp4'
+
+function useAccountCta(isAuthenticated = false) {
+  const [hasKnownAccount, setHasKnownAccount] = useState(isAuthenticated)
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      window.localStorage.setItem('spottex_has_account', '1')
+      setHasKnownAccount(true)
+      return
+    }
+    setHasKnownAccount(window.localStorage.getItem('spottex_has_account') === '1')
+  }, [isAuthenticated])
+
+  if (isAuthenticated) return { href: '/app/dashboard', label: 'Otevřít aplikaci' }
+  if (hasKnownAccount) return { href: '/prihlaseni', label: 'Přihlásit se' }
+  return { href: '/registrace', label: 'Vytvořit účet' }
+}
 
 const faqData = [
   {
@@ -15,11 +32,11 @@ const faqData = [
   },
   {
     q: 'Kolik služba stojí?',
-    a: 'Účtujeme pouze 20 % z dosažených úspor. Pokud vám nic neušetříme, neplatíte vůbec nic. Žádné paušální poplatky, žádné skryté náklady. Platba probíhá automaticky měsíčně.',
+    a: 'Prvních 30 dní je zdarma. Potom si vyberete měsíční variantu za 15 % ze skutečně dosažené úspory, maximálně 99 Kč měsíčně, nebo roční variantu za 12,5 % z úspory, maximálně 999 Kč ročně.',
   },
   {
     q: 'Můžu službu nejprve vyzkoušet?',
-    a: 'Ano! Nabízíme 30 dní testovacího běhu zcela zdarma a bez závazků. Po uplynutí zkušebního období se automaticky přepnete na standardní model — 20 % z úspor.',
+    a: 'Ano. Prvních 30 dní provozu je zdarma a bez závazků. Řízení se nikdy nezapne samo — aktivujete ho až po kontrole výpočtu a podmínek.',
   },
   {
     q: 'Jak probíhá připojení k Solax Cloudu?',
@@ -27,7 +44,7 @@ const faqData = [
   },
   {
     q: 'Jak velkou úsporu mohu očekávat?',
-    a: 'Úspora závisí na velikosti vaší fotovoltaiky, spotřebě a aktuálních cenách energií. Průměrní uživatelé šetří 5 000–10 000 Kč ročně díky optimálnímu načasování nákupu a prodeje elektřiny.',
+    a: 'Úspora závisí na elektrárně, baterii, spotřebě, sazbě a cenách energie. Proto nejdřív zdarma stáhneme historii a přibližně do hodiny připravíme výpočet pro váš konkrétní provoz.',
   },
   {
     q: 'Jsou moje data v bezpečí?',
@@ -117,22 +134,6 @@ function IconPlus() {
   )
 }
 
-function IconGooglePlay() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M3.18 23.76c.36.19.77.24 1.18.11l11.03-6.37-2.42-2.42-9.79 8.68zm16.95-13.21L16.8 8.19 5.3.55C4.9.31 4.47.26 4.1.43L14.54 10.87l5.59-.32zM1.03 1.57C.68 1.96.5 2.47.5 3.05v17.9c0 .58.18 1.09.53 1.48l.08.08 10.03-10.03v-.24L1.11 1.49l-.08.08zm20.3 9.45l-2.86-1.65-2.75 2.75 2.75 2.75 2.88-1.66c.82-.47.82-1.24-.02-1.19z" />
-    </svg>
-  )
-}
-
-function IconApple() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.63.38-1.68 1.32-1.66 3.09.03 2.44 2.14 3.24 2.17 3.27-.03.07-.34 1.15-1.27 2.27M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-    </svg>
-  )
-}
-
 function Badge({ children }) {
   return (
     <div className="badge">
@@ -152,21 +153,20 @@ function HeadingRow({ children, center }) {
   )
 }
 
-function Nav() {
+export function Nav({ isAuthenticated = false }) {
+  const accountCta = useAccountCta(isAuthenticated)
   return (
     <nav className="nav">
-      <a href="#hero" className="nav-logo">
+      <a href="/" className="nav-logo">
         <img src={LOGO_URL} alt="Spottex" />
       </a>
       <div className="nav-links">
-        <a href="#problem">Problém</a>
-        <a href="#reseni">Řešení</a>
-        <a href="#cenik">Ceník</a>
-        <a href="#faq">FAQ</a>
-        <a href="#kontakt">Kontakt</a>
+        <a href="/rizeni">Řízení</a>
+        <a href="/konzultace">Konzultace</a>
+        <a href="/blog">Blog</a>
       </div>
-      <a href="https://app.spottex.cz/signup" target="_blank" rel="noreferrer" className="nav-cta">
-        Vyzkoušet online
+      <a href={accountCta.href} className="nav-cta">
+        {accountCta.label}
       </a>
     </nav>
   )
@@ -175,53 +175,128 @@ function Nav() {
 function Hero() {
   return (
     <section className="hero" id="hero">
-      <div className="hero-bg" />
       <div className="hero-video-wrap">
-        <video src={VIDEO_URL} autoPlay loop muted playsInline />
+        <video
+          src="/spottex_web_v2.mp4"
+          poster="/spottex_web_v2_poster.jpg"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+        />
       </div>
-      <img src={CLOUD_URL} alt="" className="hero-cloud" aria-hidden="true" />
+      <div className="hero-shade" />
+      <div className="hero-copy">
+        <p className="hero-kicker">Spottex · chytré řízení energie</p>
+        <h1>Začněte opravdu šetřit<br />s vaší fotovoltaikou!</h1>
+        <p>Propojíte SolaX Cloud, přibližně do hodiny uvidíte vlastní potenciál úspor a řízení zapnete až ve chvíli, kdy budete znát výsledek. Bez instalace dalšího hardwaru.</p>
+      </div>
+      <a className="hero-scroll" href="#aplikace" aria-label="Přejít k ukázce řízení">Jak funguje řízení <span>↓</span></a>
+    </section>
+  )
+}
 
-      <div className="hero-container">
-        <div className="hero-left">
-          <h1>Začněte opravdu šetřit s vaší fotovoltaikou!</h1>
+function AppShowcase({ isAuthenticated = false }) {
+  const accountCta = useAccountCta(isAuthenticated)
 
-          <p className="hero-sub">
-            Využijte potenciál své fotovoltaiky naplno bez nákladů na další hardware.
-            Zajistíme optimální práci s vyrobenou energií a minimalizaci ztrát.
+  return (
+    <section className="app-showcase" id="aplikace">
+      <div className="app-showcase-inner">
+        <div className="app-showcase-copy">
+          <span className="app-showcase-label">Spottex aplikace · aktuálně pro SolaX</span>
+          <h2>Vaše elektrárna.<br />Skutečná data.</h2>
+          <p>
+            Stačí se přihlásit a propojit SolaX Cloud. Bez další krabičky a bez zásahu do elektroinstalace
+            stáhneme historii výroby a spotřeby, porovnáme tarify, baterii i chytré řízení a zhruba do hodiny ukážeme možnou úsporu.
           </p>
+          <ul className="app-showcase-points">
+            <li>Výpočet úspor je zdarma</li>
+            <li>Řízení zůstává do vašeho potvrzení vypnuté</li>
+            <li>Průběh výpočtu i výsledky sledujete online</li>
+          </ul>
+          <div className="app-showcase-actions">
+            <a href={accountCta.href} className="figma-button">Spočítat úsporu zdarma</a>
+            <a href="/rizeni" className="figma-link">Jak řízení funguje →</a>
+          </div>
+        </div>
 
-          <div className="hero-features">
-            {[
-              'Úspora až 10 000 Kč ročně',
-              'Zařízení do 2 minut online',
-              'Neplatíte pokud nešetříte',
-              '30 dní zdarma, pak 20% z dosažených úspor',
-            ].map((label, i) => (
-              <div className="hero-feature" key={i}>
-                <span className="hero-feature-dot" />
-                <span>{label}</span>
+        <div className="phone-stage" aria-label="Ukázka mobilní aplikace Spottex">
+          <div className="phone-orbit phone-orbit--one" />
+          <div className="phone-orbit phone-orbit--two" />
+          <div className="spottex-phone spottex-phone--back" aria-hidden="true">
+            <div className="spottex-phone-notch" />
+            <div className="spottex-phone-screen spottex-phone-screen--simulation">
+              <span className="phone-kicker">Výpočet úspor</span>
+              <strong>72 % hotovo</strong>
+              <div className="phone-progress"><i /></div>
+              <div className="phone-result"><span>Tarif</span><b>D57d</b></div>
+              <div className="phone-result"><span>Baterie</span><b>15 kWh</b></div>
+              <div className="phone-saving"><span>Odhad úspory</span><b>4 860 Kč / rok</b></div>
+            </div>
+          </div>
+          <div className="spottex-phone spottex-phone--front">
+            <div className="spottex-phone-notch" />
+            <div className="spottex-phone-screen">
+              <div className="phone-header"><span><i /> Rodinný dům</span><b>•••</b></div>
+              <p className="phone-date">Dnes · živá data</p>
+              <div className="phone-energy-main">
+                <span>Aktuální výroba</span>
+                <strong>4,28 <small>kW</small></strong>
+                <svg viewBox="0 0 220 86" role="img" aria-label="Průběh výroby">
+                  <defs><linearGradient id="phone-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#69bd45" stopOpacity=".38" /><stop offset="1" stopColor="#69bd45" stopOpacity="0" /></linearGradient></defs>
+                  <path d="M0 76 C28 74 38 68 57 61 C76 54 78 36 99 29 C122 20 130 8 151 17 C173 27 176 51 220 67 L220 86 L0 86Z" fill="url(#phone-fill)" />
+                  <path d="M0 76 C28 74 38 68 57 61 C76 54 78 36 99 29 C122 20 130 8 151 17 C173 27 176 51 220 67" fill="none" stroke="#69bd45" strokeWidth="3" strokeLinecap="round" />
+                </svg>
               </div>
-            ))}
+              <div className="phone-metrics">
+                <div><span>Spotřeba</span><strong>1,14 kW</strong></div>
+                <div><span>Baterie</span><strong>73 %</strong></div>
+              </div>
+              <div className="phone-control"><span><i /> Řízení vypnuto</span><b>Zapnout až po výpočtu</b></div>
+              <div className="phone-tabbar"><i /><i /><i /><i /></div>
+            </div>
           </div>
-
-          <div className="hero-ctas">
-            <a href="https://app.spottex.cz/signup" target="_blank" rel="noreferrer" className="btn-primary">
-              Vyzkoušet online
-            </a>
-            <a href="https://app.spottex.cz/signup" className="btn-store">
-              <IconGooglePlay />
-              Stáhnout v Google Play
-            </a>
-            <a href="https://app.spottex.cz/signup" className="btn-store">
-              <IconApple />
-              Stáhnout v App Store
-            </a>
+          <div className="phone-trust-badge">
+            <span>Bez dalšího hardwaru</span>
+            <strong>SolaX Cloud</strong>
           </div>
         </div>
+      </div>
+    </section>
+  )
+}
 
-        <div className="hero-right">
-          <img src={PHONE_URL} alt="Spottex app" className="hero-phone" />
+function TimelineSection() {
+  const milestones = [
+    { state: 'hotovo', title: 'Energetické studie', text: 'Simulace výroby, spotřeby, baterií a distribučních sazeb nad reálnými daty.' },
+    { state: 'hotovo', title: 'Sběr dat ze SolaX', text: 'Bez dalšího hardwaru ukládáme výrobu, spotřebu, baterii a tok energie v čase.' },
+    { state: 'nyni', title: 'Chytré řízení FVE', text: 'Pilotujeme bezpečné řízení střídače podle cen, predikce a potřeb domácnosti.' },
+    { state: 'dalsi', title: 'Řízení spotřebičů', text: 'Zapojíme ohřev vody, nabíjení auta a další flexibilní spotřebu.' },
+    { state: 'dalsi', title: 'Komunitní sdílení', text: 'Budeme koordinovat výrobu a spotřebu mezi domácnostmi a firmami.' },
+    { state: 'dalsi', title: 'Obchodník s energiemi', text: 'Propojíme řízení zařízení s nákupem, prodejem a chytrým tarifem.' },
+  ]
+
+  return (
+    <section className="journey-section" id="o-nas">
+      <div className="journey-inner">
+        <div className="journey-heading">
+          <span>Naše cesta</span>
+          <h2>Nestavíme slib. Stavíme na datech.</h2>
+          <p>Začali jsme energetickými studiemi. Dnes řídíme fotovoltaiku a míříme k propojené energetice domácností, firem a komunit.</p>
         </div>
+        <ol className="journey-timeline">
+          {milestones.map((item, index) => (
+            <li className={`journey-item journey-item--${item.state}`} key={`${item.title}-${index}`}>
+              <div className="journey-marker"><span>{index + 1}</span></div>
+              <div className="journey-card">
+                <span className="journey-state">{item.state === 'hotovo' ? 'Hotovo' : item.state === 'nyni' ? 'Právě teď' : 'Připravujeme'}</span>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   )
@@ -313,7 +388,7 @@ function BenefitsSection() {
         <div className="benefits-left">
           <h2>Klíčové přínosy</h2>
           <p className="benefits-sub">
-            Pomáháme majitelům fotovoltaiky vydělat více – automaticky, férově a bez starostí.
+            Nejdřív nad vašimi daty prokážeme potenciál. Teprve potom rozhodnete, jestli chcete řízení aktivovat.
           </p>
 
           <div className="benefits-cards">
@@ -324,7 +399,7 @@ function BenefitsSection() {
               },
               {
                 title: 'Férový model',
-                desc: 'Platíte jen tehdy, pokud opravdu šetříte. Pokud nic neušetříme, neplatíte vůbec nic.',
+                desc: 'Platíte podíl ze skutečně dosažené úspory, vždy jen do jasně stanoveného měsíčního nebo ročního maxima.',
               },
               {
                 title: 'Jednoduchost',
@@ -332,7 +407,7 @@ function BenefitsSection() {
               },
               {
                 title: 'Transparentnost',
-                desc: 'Žádné fixní ani skryté poplatky. Pouze provize z ušetřeného.',
+                desc: 'V aplikaci vidíte vstupní data, průběh simulace, výsledek i stav řízení.',
               },
             ].map((b, i) => (
               <div className="benefit-card" key={i}>
@@ -350,7 +425,7 @@ function BenefitsSection() {
 
         <div className="benefits-right">
           <div className="benefits-app-wrap">
-            <a href="https://app.spottex.cz/signup" target="_blank" rel="noreferrer">
+            <a href="/registrace">
               <img src={APP_URL} alt="Spottex aplikace" />
             </a>
           </div>
@@ -406,36 +481,68 @@ function HowSection() {
 }
 
 function PricingSection() {
+  const plans = [
+    {
+      name: 'Na vyzkoušení',
+      price: '30 dní',
+      unit: 'zdarma',
+      description: 'Nejdřív si na vlastní elektrárně ověříte přínos Spottexu. Bez platby a bez automatického zapnutí řízení.',
+      cta: 'Vyzkoušet zdarma',
+      href: '/registrace?plan=trial',
+    },
+    {
+      name: 'Měsíční',
+      price: '15 %',
+      unit: 'z úspor',
+      cap: 'maximálně 99 Kč / měsíc',
+      description: 'Platíte jen podle skutečně dosažené úspory. Vyhodnocení a horní limit se počítají za každý měsíc.',
+      cta: 'Zvolit měsíční variantu',
+      href: '/registrace?plan=monthly',
+      featured: true,
+    },
+    {
+      name: 'Roční',
+      price: '12,5 %',
+      unit: 'z úspor',
+      cap: 'maximálně 999 Kč / rok',
+      description: 'Nižší podíl z úspor při ročním vyhodnocení. Ani za celý rok nezaplatíte více než stanovený limit.',
+      cta: 'Zvolit roční variantu',
+      href: '/registrace?plan=yearly',
+    },
+  ]
+
   return (
     <section className="pricing-section" id="cenik">
       <div className="pricing-inner">
         <div className="section-top section-top--center">
           <Badge>Ceník</Badge>
-          <HeadingRow center>Jedna jednoduchá cena</HeadingRow>
+          <HeadingRow center>Jednoduchá cena s garancí úspory</HeadingRow>
         </div>
 
-        <p className="pricing-tagline">Jednoduchý start — začínáte zdarma bez závazků</p>
+        <p className="pricing-tagline">Začněte 30 dny zdarma. Potom platíte jen část z toho, co vám Spottex skutečně ušetří — nikdy více než uvedený limit.</p>
 
-        <div className="pricing-card">
-          <div className="pricing-card-top">
-            <h2 className="pricing-plan-name">Celoroční optimalizace</h2>
-          </div>
+        <div className="pricing-grid">
+          {plans.map((plan) => (
+            <article className={`pricing-card${plan.featured ? ' pricing-card--featured' : ''}`} key={plan.name}>
+              {plan.featured && <span className="pricing-recommended">Nejflexibilnější</span>}
+              <div className="pricing-card-top">
+                <h2 className="pricing-plan-name">{plan.name}</h2>
+              </div>
 
-          <div className="pricing-price-row">
-            <span className="pricing-pct">20&nbsp;%</span>
-            <span className="pricing-unit">z ušetřené částky</span>
-          </div>
+              <div className="pricing-price-row">
+                <span className="pricing-pct">{plan.price}</span>
+                <span className="pricing-unit">{plan.unit}</span>
+              </div>
 
-          <div className="pricing-divider" />
+              {plan.cap && <p className="pricing-cap">{plan.cap}</p>}
+              <div className="pricing-divider" />
+              <p className="pricing-desc">{plan.description}</p>
 
-          <p className="pricing-desc">
-            Platíte pouze pokud vám něco ušetříme. Žádné paušály ani skryté poplatky.
-            Platba měsíčně automaticky, 30 dní testovacího běhu zdarma.
-          </p>
-
-          <a href="https://app.spottex.cz/signup" target="_blank" rel="noreferrer" className="btn-primary pricing-cta">
-            Začít vydělávat
-          </a>
+              <a href={plan.href} className="btn-primary pricing-cta">
+                {plan.cta}
+              </a>
+            </article>
+          ))}
         </div>
       </div>
     </section>
@@ -492,23 +599,62 @@ function FaqSection() {
   )
 }
 
-function CtaSection() {
+function ProductHero({ isAuthenticated = false }) {
+  const accountCta = useAccountCta(isAuthenticated)
+  return (
+    <section className="product-hero">
+      <div className="product-hero-inner">
+        <div className="product-hero-copy">
+          <span>Spottex pro SolaX</span>
+          <h1>Spočítejte úsporu dřív, než zapnete řízení.</h1>
+          <p>Propojíme vaši elektrárnu bez dalšího hardwaru, stáhneme historická data a přibližně do hodiny porovnáme tarif, baterii, rozšíření FVE i chytré řízení.</p>
+          <div className="product-hero-actions">
+            <a href={accountCta.href} className="figma-button">Spočítat úsporu zdarma</a>
+            <a href="/konzultace" className="figma-link">Domluvit konzultaci →</a>
+          </div>
+        </div>
+        <div className="product-hero-facts">
+          <article><strong>~ 1 hodina</strong><span>orientační výpočet nad historií</span></article>
+          <article><strong>0 Kč</strong><span>za výpočet potenciálu úspor</span></article>
+          <article><strong>0× hardware</strong><span>připojení přímo přes SolaX Cloud</span></article>
+          <article><strong>Váš souhlas</strong><span>řízení se aktivuje až na váš pokyn</span></article>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AboutHero() {
+  return (
+    <section className="about-hero">
+      <div>
+        <span>O Spottexu</span>
+        <h1>Energetiku stavíme na měření, ne na dojmu.</h1>
+        <p>Jsme tým z energetiky, softwaru a datové analytiky. Zkušenosti z dřívějších firem a odborných studií přenášíme do produktu, který má lidem i firmám dát kontrolu nad vlastní energií.</p>
+      </div>
+    </section>
+  )
+}
+
+function CtaSection({ isAuthenticated = false }) {
+  const accountCta = useAccountCta(isAuthenticated)
   return (
     <section className="cta-section" id="kontakt">
       <img src={CLOUD_URL} alt="" className="cta-cloud cta-cloud--l" aria-hidden="true" />
       <img src={CLOUD_URL} alt="" className="cta-cloud cta-cloud--r" aria-hidden="true" />
 
       <div className="cta-inner">
-        <h2>Připraveni šetřit s&nbsp;vaší fotovoltaikou?</h2>
-        <a href="https://app.spottex.cz/signup" target="_blank" rel="noreferrer" className="cta-btn">
-          Vyzkoušet zdarma
+        <h2>Za hodinu můžete znát potenciál své elektrárny.</h2>
+        <p>Propojte SolaX Cloud. Stáhneme historii, porovnáme tarif, baterii i řízení a pošleme vám výsledek. Zdarma a bez zapnutí řízení.</p>
+        <a href={accountCta.href} className="cta-btn">
+          Spočítat úsporu zdarma
         </a>
       </div>
     </section>
   )
 }
 
-function Footer() {
+export function Footer() {
   return (
     <footer className="footer">
       <div className="footer-inner">
@@ -517,51 +663,76 @@ function Footer() {
             <img src={LOGO_URL} alt="Spottex" />
           </div>
           <p className="footer-desc">
-            Chytré hospodaření s energií z fotovoltaiky&nbsp;– bez práce, bez rizika
-            a bez fixních poplatků. Úspora až 10&nbsp;000&nbsp;Kč ročně díky
-            automatickému nákupu a prodeji.
+            Datová a řídicí platforma pro fotovoltaiku. Aktuálně propojujeme SolaX Cloud
+            bez instalace dalšího hardwaru.
           </p>
         </div>
 
         <div className="footer-nav">
-          <a href="#problem">Problém</a>
-          <a href="#reseni">Řešení</a>
-          <a href="#cenik">Ceník</a>
-          <a href="#faq">FAQ</a>
-          <a href="#kontakt">Kontakt</a>
+          <a href="/rizeni">Řízení</a>
+          <a href="/rizeni#cenik">Ceník</a>
+          <a href="/konzultace">Konzultace</a>
+          <a href="/blog">Blog</a>
+          <a href="/prihlaseni">Přihlášení</a>
         </div>
 
         <div className="footer-right">
           <div className="footer-legal">
-            <a href="#">Podmínky použití</a>
-            <a href="#">Zpracování osobních údajů</a>
-            <a href="#">Reklamační řád</a>
+            <a href="/obchodni-podminky">Podmínky použití</a>
+            <a href="/ochrana-osobnich-udaju">Zpracování osobních údajů</a>
+            <button type="button" onClick={() => window.dispatchEvent(new Event('spottex:open-consent'))}>Nastavení cookies</button>
           </div>
         </div>
       </div>
 
       <div className="footer-bottom">
-        <span>© 2025 Spottex Energy s.r.o. | Všechna práva vyhrazena</span>
-        <a href="https://framer.com" target="_blank" rel="noreferrer" className="footer-framer">
-          Built in Framer
-        </a>
+        <span>© {new Date().getFullYear()} Spottex Energy s.r.o. | Všechna práva vyhrazena</span>
       </div>
     </footer>
   )
 }
 
-export default function App() {
+/** @param {{ publicContent?: import('react').ReactNode, isAuthenticated?: boolean }} props */
+export default function App({ publicContent = null, isAuthenticated = false }) {
   return (
     <>
-      <Nav />
+      <Nav isAuthenticated={isAuthenticated} />
       <Hero />
+      <AppShowcase isAuthenticated={isAuthenticated} />
+      <TimelineSection />
+      {publicContent}
+      <Footer />
+    </>
+  )
+}
+
+/** @param {{ isAuthenticated?: boolean }} props */
+export function ProductMarketingPage({ isAuthenticated = false }) {
+  return (
+    <>
+      <Nav isAuthenticated={isAuthenticated} />
+      <ProductHero isAuthenticated={isAuthenticated} />
+      <MiniConsultationCalendar />
       <ProblemSection />
       <ReseniSection />
       <BenefitsSection />
       <HowSection />
       <PricingSection />
       <FaqSection />
-      <CtaSection />
+      <CtaSection isAuthenticated={isAuthenticated} />
+      <Footer />
+    </>
+  )
+}
+
+/** @param {{ publicContent?: import('react').ReactNode, isAuthenticated?: boolean }} props */
+export function AboutMarketingPage({ publicContent = null, isAuthenticated = false }) {
+  return (
+    <>
+      <Nav isAuthenticated={isAuthenticated} />
+      <AboutHero />
+      <TimelineSection />
+      {publicContent}
       <Footer />
     </>
   )
