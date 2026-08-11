@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -8,9 +9,41 @@ import { fileURLToPath } from "node:url";
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const socketPath = process.env.INVOICE_PARSER_SOCKET ?? "/run/invoice-parser/parser.sock";
 const port = process.env.INVOICE_PARSER_PORT ? Number(process.env.INVOICE_PARSER_PORT) : null;
+const bindAddress = process.env.INVOICE_PARSER_BIND ?? "127.0.0.1";
+const token = process.env.INVOICE_PARSER_TOKEN ?? "";
 const maxDocumentBytes = Number(process.env.INVOICE_MAX_DOCUMENT_BYTES ?? 10 * 1024 * 1024);
 const timeoutMs = Number(process.env.INVOICE_CODEX_TIMEOUT_MS ?? 8 * 60_000);
 let active = false;
+
+// This endpoint drives a Codex agent, so an unauthenticated caller could burn
+// API credit and feed it arbitrary documents. Until now the only protection was
+// that nothing could route to it: a unix socket, or a port bound to loopback in
+// a network namespace shared with the coordinator alone. The moment it listens
+// anywhere else -- a WireGuard address, so the platform can reach it from
+// another host without the Codex credential ever leaving this machine -- that
+// assumption is gone and a token is the thing standing in for it.
+const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
+const isLoopbackOnly = port !== null && LOOPBACK.has(bindAddress);
+const requiresToken = port !== null && !isLoopbackOnly;
+
+if (requiresToken && token.length < 32) {
+  console.error(
+    `Refusing to listen on ${bindAddress}: INVOICE_PARSER_TOKEN must be set to at least 32 characters ` +
+      "when the parser is reachable beyond loopback.",
+  );
+  process.exit(1);
+}
+
+function tokenAccepted(header) {
+  if (!token) return true;
+  const prefix = "Bearer ";
+  if (typeof header !== "string" || !header.startsWith(prefix)) return false;
+  const presented = Buffer.from(header.slice(prefix.length));
+  const expected = Buffer.from(token);
+  // timingSafeEqual throws on a length mismatch, which would itself leak length.
+  if (presented.length !== expected.length) return false;
+  return timingSafeEqual(presented, expected);
+}
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -107,6 +140,11 @@ const server = http.createServer((request, response) => {
     response.writeHead(404).end();
     return;
   }
+  if (!tokenAccepted(request.headers.authorization)) {
+    response.writeHead(401, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end('{"error":"unauthorized"}');
+    return;
+  }
   if (active) {
     response.writeHead(429, { "content-type": "application/json" });
     response.end('{"error":"busy"}');
@@ -136,7 +174,9 @@ const server = http.createServer((request, response) => {
 });
 
 if (port) {
-  server.listen(port, "127.0.0.1", () => console.log("Invoice parser is ready"));
+  server.listen(port, bindAddress, () =>
+    console.log(`Invoice parser is ready on ${bindAddress}:${port}${token ? " (token required)" : ""}`),
+  );
 } else {
   await unlink(socketPath).catch(() => undefined);
   server.listen(socketPath, async () => {

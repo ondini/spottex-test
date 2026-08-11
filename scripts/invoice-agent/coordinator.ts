@@ -8,6 +8,21 @@ import { persistInvoiceAiDraft } from "../../src/lib/energy/invoice-ai";
 const prisma = new PrismaClient();
 const socketPath = process.env.INVOICE_PARSER_SOCKET ?? "/run/invoice-parser/parser.sock";
 const parserUrl = process.env.INVOICE_PARSER_URL;
+const parserToken = process.env.INVOICE_PARSER_TOKEN ?? "";
+
+// The parser holds the Codex credential and stays on the machine that owns it,
+// so a remote INVOICE_PARSER_URL means the request crosses a network and has to
+// carry the token. Refuse to start rather than poll a remote parser unarmed and
+// discover it only through a stream of 401s.
+if (parserUrl) {
+  const host = new URL(parserUrl).hostname;
+  const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
+  if (!loopback && parserToken.length < 32) {
+    throw new Error(
+      "INVOICE_PARSER_TOKEN of at least 32 characters is required when INVOICE_PARSER_URL is not loopback",
+    );
+  }
+}
 const pollMs = Math.max(1_000, Number(process.env.INVOICE_AGENT_POLL_MS ?? 10_000));
 const requestTimeoutMs = Math.max(
   30_000,
@@ -84,6 +99,7 @@ function parseWithIsolatedWorker(document: ClaimedDocument, content: Buffer): Pr
       headers: {
         "content-type": "application/json",
         "content-length": String(body.length),
+        ...(parserToken ? { authorization: `Bearer ${parserToken}` } : {}),
       },
       timeout: requestTimeoutMs,
     }, (response) => {

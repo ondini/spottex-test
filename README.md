@@ -430,6 +430,25 @@ autentizace tokenem; `COSTS_INTERNAL_API_URL` proto míří na adresu uvnitř
 tunelu, nikdy na veřejný internet. Když je proměnná prázdná, katalog se jen
 vypne a zbytek aplikace běží dál — výpadek tunelu tedy web nepoloží.
 
+**Parser faktur je na tom stejně.** Drží Codex přihlášení, takže zůstává na
+stroji, který ho vlastní, a nikam se nekopíruje. Spouští se profilem jen tam:
+
+```bash
+docker compose --env-file .env.production --profile invoice-parser \
+  -f deploy/compose.prod.yml up -d
+```
+
+Na ostatních strojích běží jen `invoice-coordinator`, který na parser sáhne přes
+`INVOICE_PARSER_URL` uvnitř tunelu a `INVOICE_PARSER_TOKEN`.
+
+Ten token není formalita: endpoint spouští Codex agenta, takže bez něj by
+kdokoli na tunelu mohl pálit API kredit a podstrkovat mu vlastní dokumenty.
+Dokud parser poslouchal jen na unixovém socketu nebo na loopbacku ve sdíleném
+síťovém namespace s koordinátorem, chránila ho nedosažitelnost. Jakmile
+poslouchá jinde, nastupuje token — a obě strany **odmítnou naběhnout**, pokud
+chybí nebo je kratší než 32 znaků. `/health` zůstává bez autentizace, aby
+fungoval healthcheck.
+
 Žádný compose soubor se nepřipojuje k Docker síti jiného projektu. To by
 fungovalo jen na stroji, kde náhodou běží všechno pohromadě.
 

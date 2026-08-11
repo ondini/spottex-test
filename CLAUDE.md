@@ -244,6 +244,8 @@ Run checks proportional to the change, and run `npm run preflight` before handof
 
 No compose file may join another project's Docker network. Everything outside a stack — the costs catalog, the energy backend, GridLink — is reached over its URL and credentials, so each stack starts on any host. The costs catalog stays on its own machine and is reached through a WireGuard tunnel and VPS with a token; `COSTS_INTERNAL_API_URL` must point inside the tunnel, never at the public internet, and an empty value only disables the catalog rather than breaking the app.
 
+The invoice parser follows the same rule for the same reason: it holds the Codex credential, so it runs only on the host that owns it, behind the `invoice-parser` compose profile, and everywhere else `invoice-coordinator` reaches it over the tunnel with `INVOICE_PARSER_URL` and `INVOICE_PARSER_TOKEN`. The endpoint drives a Codex agent, so both parser and coordinator refuse to start when the URL is not loopback and the token is missing or under 32 characters. Never bundle the Codex credential into a handover for a host that only consumes the parser.
+
 `deploy/compose.prod.yml` uses selective `environment` mappings rather than `env_file`, so secrets are scoped to the services that need them. Compose interpolation does not automatically read `.env.production`; every production command must include `--env-file .env.production`. Start from `deploy/env.production.example` and replace every placeholder.
 
 The production stack provides:

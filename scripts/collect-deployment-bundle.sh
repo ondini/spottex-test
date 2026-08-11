@@ -144,21 +144,35 @@ fi
 
 # ---------------------------------------------------------------- codex secret
 
-CODEX_AUTH="$(env_get "$PLATFORM_ENV" CODEX_AUTH_FILE)"
-[ -n "$CODEX_AUTH" ] || CODEX_AUTH="${CODEX_AUTH_FILE:-}"
-
-# compose.prod.yml mounts this with ${CODEX_AUTH_FILE:?...}, so an unset value
-# stops `docker compose config` before anything starts. Catch it here instead of
-# on the far machine.
-CODEX_REQUIRED=0
-grep -q 'CODEX_AUTH_FILE:?' "$REPO_ROOT/deploy/compose.prod.yml" 2>/dev/null && CODEX_REQUIRED=1
-
-if [ -z "$CODEX_AUTH" ]; then
-  [ "$CODEX_REQUIRED" -eq 1 ] && note_problem \
-    "invoice parser: CODEX_AUTH_FILE is unset, but deploy/compose.prod.yml requires it -- docker compose will refuse to start. Set it, or drop the invoice-parser/invoice-coordinator services from the target deployment."
-elif [ ! -f "$CODEX_AUTH" ]; then
-  note_problem "invoice parser: CODEX_AUTH_FILE points at $CODEX_AUTH, which does not exist"
+# The parser keeps the Codex credential on the machine that owns it and is
+# reached over the tunnel with a token, so the receiving host needs the URL and
+# the token -- never the credential itself. It is deliberately not collected.
+if [ "$(env_get "$PLATFORM_ENV" ENERGY_INVOICE_AI_ENABLED)" = "true" ]; then
+  PARSER_URL="$(env_get "$PLATFORM_ENV" INVOICE_PARSER_URL)"
+  if is_placeholder "$PARSER_URL"; then
+    note_problem "invoice parser: ENERGY_INVOICE_AI_ENABLED=true but INVOICE_PARSER_URL is unset"
+  else
+    PARSER_HOST="${PARSER_URL#*://}"; PARSER_HOST="${PARSER_HOST%%[:/]*}"
+    case "$PARSER_HOST" in
+      127.0.0.1|localhost|::1)
+        echo "note: INVOICE_PARSER_URL is loopback, so the target host is expected to run the parser itself" >&2 ;;
+      *)
+        PARSER_TOKEN="$(env_get "$PLATFORM_ENV" INVOICE_PARSER_TOKEN)"
+        if [ "${#PARSER_TOKEN}" -lt 32 ]; then
+          note_problem "invoice parser: INVOICE_PARSER_TOKEN must be at least 32 characters when the parser is remote -- the coordinator refuses to start without it, and an untokened parser lets anyone on the tunnel drive a Codex agent"
+        fi ;;
+    esac
+  fi
 fi
+
+# Only the host that actually runs the parser profile needs the credential, and
+# that host is not the one receiving this bundle.
+CODEX_AUTH="$(env_get "$PLATFORM_ENV" CODEX_AUTH_FILE)"
+if [ -n "$CODEX_AUTH" ]; then
+  echo "note: CODEX_AUTH_FILE is set in this environment; it is deliberately NOT bundled." >&2
+  echo "      The parser stays on the machine that owns the credential." >&2
+fi
+CODEX_AUTH=""
 
 # ------------------------------------------------------------------- reporting
 
@@ -199,8 +213,11 @@ Everything here is secret. It is what git deliberately does not carry.
   checkout as `.env`. `HF_TOKEN` matters: `reframed-cz/PV_pred` is private and
   `model_sync` gates every forecasting service, so without it neither
   `control_broadcaster` nor `invertor_updater` starts at all.
-- `codex-auth.json` — mounted read-only by the invoice parser. Omitted if that
-  service is not in use.
+The Codex credential is **not** here and should not be asked for. The invoice
+parser stays on the machine that owns it and is reached over the tunnel with
+`INVOICE_PARSER_URL` and `INVOICE_PARSER_TOKEN`, the same arrangement as the
+costs catalog. Run it with `docker compose --profile invoice-parser up -d`
+only on that machine.
 
 Deployment steps are in `README.md` of the platform repository, section
 "Nasazení na nový stroj".
