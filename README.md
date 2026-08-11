@@ -489,10 +489,48 @@ Seed spouštějte jen vědomě — každý běh přehashuje `ADMIN_SEED_PASSWORD
 zapíše ho adminovi a zvýší `authVersion`, čímž zneplatní jeho existující
 relace.
 
-### Tajemství
+### Předání tajemství: `scripts/collect-deployment-bundle.sh`
 
-Nic z výše uvedeného není v gitu a být nemá. Předání na cílový stroj potřebuje
-vlastní bezpečný kanál a jmenovitě určeného správce — stejně jako rotace klíčů,
+Nic z výše uvedeného není v gitu a být nemá. Skript posbírá to, co gitu chybí,
+**ověří úplnost** a výsledek zašifruje:
+
+```bash
+scripts/collect-deployment-bundle.sh            # výchozí výstup do kořene repozitáře
+scripts/collect-deployment-bundle.sh -b /cesta/k/spottex_backend -o /tmp
+```
+
+Sbírá produkční env platformy, `.env` backendu a Codex přihlášení pro parser
+faktur. Přidá `README.md` s postupem a `MANIFEST.md`, který vypisuje **jen názvy
+klíčů, nikdy hodnoty** — manifest tedy jde poslat i kanálem, kterým se předání
+domlouvá.
+
+Než něco zapíše, kontroluje mimo jiné:
+
+- že `APP_URL` je HTTPS a `APP_ENCRYPTION_KEY` dekóduje přesně na 32 bytů,
+- že owner, app a backup heslo k databázi jsou tři různá a záložní passphrase je
+  odlišná od nich,
+- že backendový `.env` má `HF_TOKEN` (bez něj `model_sync` zablokuje řízení),
+- že `COSTS_INTERNAL_API_URL` nemíří na jméno platné jen na jednom stroji,
+- že `SPOTTEX_LEGACY_API_URL` je HTTPS, pokud není vědomě povolena výjimka,
+- SMTP jen když není nastavený Resend, GoPay jen při `PAYMENT_PROVIDER=GOPAY`.
+
+Když něco chybí nebo v tom zůstal placeholder, **skript balíček nevytvoří** a
+vypíše seznam. To je záměr: nasazení má selhat tady, ne v noci na stroji, kam
+nikdo nevidí. Vynutit jde přes `--force`.
+
+Passphrase se bere z `BUNDLE_PASSPHRASE`, jinak se na ni skript zeptá. Posílejte
+ji **jiným kanálem než balíček**.
+
+Rozbalení na cílovém stroji:
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -in spottex-handover-<timestamp>.tar.gz.enc | tar -xzf -
+```
+
+Zbytek — WireGuard peer, DNS a TLS, databázové role, off-site zálohy a plán
+návratu — skript udělat nemůže; jsou vypsané v `README.md` uvnitř balíčku.
+Předání pořád potřebuje jmenovitě určeného správce, stejně jako rotace klíčů,
 obnova zálohy a přístup k logům, když v noci selže řízení střídačů.
 
 ## Produkční nasazení přes Docker Compose
