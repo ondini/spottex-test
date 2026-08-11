@@ -200,7 +200,23 @@ docker compose --env-file Secrets/spottex.development.env \
 ```
 
 Cestu k backendu lze přepsat proměnnou `SPOTTEX_BACKEND_COMPOSE`; výchozí je
-`/home/anna/Documents/spottex_backend/docker-compose.yml`.
+`/home/web/spottex_backend_new/docker-compose.yml`.
+
+Mířte na checkout větve, kterou opravdu chcete provozovat, ne na libovolnou
+pracovní kopii na stroji. Zastaralé kopii může chybět služba `model_sync` a
+predikce pak spadnou zpět na vyřazené LSTM checkpointy místo připnutého
+LightGBM vydání.
+
+Checkout backendu potřebuje vlastní `.env` včetně `HF_TOKEN` — repozitář
+`reframed-cz/PV_pred` je privátní a všechny predikční služby čekají na
+`service_completed_successfully` od `model_sync`, takže bez tokenu vůbec
+nenaběhne `control_broadcaster` ani `invertor_updater`.
+
+Sjednocený projekt přebírá datové volumes běžících projektů
+(`spottex_backend_postgres_data`, `redis_data`, `celery_beat_data` a
+`spottex-platform-dev_spottex_dev_db`) jako externí. Bez toho by si založil
+vlastní prázdné a backend by naběhl bez zákazníků, střídačů i historie měření.
+Právě proto smí běžet vždy jen jeden z projektů.
 
 Ve sloučeném projektu míří aplikace na backend přes síť projektu
 (`http://web:2086`, databáze `db:5432`) místo přes `host.docker.internal`

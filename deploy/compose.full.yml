@@ -5,6 +5,15 @@
 # so that repository stays the single owner of its services. Point
 # SPOTTEX_BACKEND_COMPOSE at your checkout if it is not in the default place.
 #
+# Point it at a checkout of the branch you actually want to run, not at whatever
+# working copy happens to be on the machine: a stale one can silently be missing
+# `model_sync`, in which case the forecasters fall back to the retired LSTM
+# checkpoints instead of the pinned LightGBM release.
+#
+# The backend checkout needs its own .env, including HF_TOKEN -- reframed-cz/PV_pred
+# is private, and every forecasting service waits on model_sync completing, so a
+# missing token keeps control_broadcaster and invertor_updater from starting at all.
+#
 # DO NOT start this alongside a separately running `spottex_backend` project.
 # Both would bind 2086/5434 and both would run control_broadcaster and the
 # inverter workers against the same real inverters. Stop the standalone
@@ -22,7 +31,7 @@
 name: spottex-full
 
 include:
-  - path: ${SPOTTEX_BACKEND_COMPOSE:-/home/anna/Documents/spottex_backend/docker-compose.yml}
+  - path: ${SPOTTEX_BACKEND_COMPOSE:-/home/web/spottex_backend_new/docker-compose.yml}
   - path: compose.dev.yml
 
 services:
@@ -51,3 +60,24 @@ networks:
   spottex_backend:
     name: spottex-full_backend_unused
     external: false
+
+volumes:
+  # Adopt the volumes the standalone spottex_backend project already owns.
+  # Without this the merged project would create empty spottex-full_* volumes
+  # and the backend would come up against a blank database -- no customers,
+  # no inverters, no measurement history. Only one of the two projects may run
+  # at a time, which is already required because of the port bindings.
+  postgres_data:
+    name: spottex_backend_postgres_data
+    external: true
+  redis_data:
+    name: spottex_backend_redis_data
+    external: true
+  celery_beat_data:
+    name: spottex_backend_celery_beat_data
+    external: true
+  # Same for the platform's own database, otherwise the merged project starts
+  # with no users, analyses or consultations.
+  spottex_dev_db:
+    name: spottex-platform-dev_spottex_dev_db
+    external: true
