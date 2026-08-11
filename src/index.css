@@ -140,8 +140,24 @@ p {
   text-align: center;
 }
 
+/* Spottex/Small_header. The section eyebrow is plain uppercase green text in
+   the design, not the pill-with-dot badge; .section-top already supplies the
+   spacing, so this carries no margin of its own. */
+.section-label {
+  color: #4d9e32;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: 1.56px;
+  text-transform: uppercase;
+}
+
+/* Spottex/Text_16. */
 .section-sub {
   font-size: 16px;
+  font-weight: 400;
+  line-height: 25.6px;
+  letter-spacing: -.5px;
   color: var(--text-muted);
   max-width: 560px;
 }

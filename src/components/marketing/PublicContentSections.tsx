@@ -14,10 +14,7 @@ export async function FounderSection() {
     <section className="public-content-section public-content-section--founders" id="zakladatele" aria-labelledby="founders-title">
       <div className="public-content-inner">
         <div className="section-top section-top--center">
-          <div className="badge">
-            <span className="badge-dot" />
-            Náš tým
-          </div>
+          <span className="section-label">Náš tým</span>
           <div className="heading-row heading-row--center">
             <div className="heading-line" />
             <h2 id="founders-title">Lidé za Spottexem</h2>
@@ -82,10 +79,7 @@ export async function ReferenceProjectSection() {
     <section className="public-content-section public-content-section--references" id="reference" aria-labelledby="references-title">
       <div className="public-content-inner">
         <div className="section-top section-top--center">
-          <div className="badge">
-            <span className="badge-dot" />
-            Reference
-          </div>
+          <span className="section-label">Reference</span>
           <div className="heading-row heading-row--center">
             <div className="heading-line" />
             <h2 id="references-title">Firmy a projekty, na kterých stavíme</h2>
