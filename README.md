@@ -413,6 +413,88 @@ Všechna hesla vložená do PostgreSQL URL musí být URL-encoded. Backup image 
 
 Retence probíhá přes job runner nejvýše jednou za 23 hodin. Hodnoty musí být kladné celé dny a aplikace je omezuje maximálně na 3650 dní. Před změnou je slaďte se schválenými zásadami ochrany osobních údajů.
 
+## Nasazení na nový stroj
+
+Platforma se skládá ze tří samostatných kódových základen ve třech
+repozitářích. Nesdílejí procesy ani souborový systém — mluví spolu výhradně
+přes URL a přihlašovací údaje, takže každá může běžet jinde.
+
+| Codebase | Repozitář | Kde běží |
+|---|---|---|
+| Next.js platforma | `ondini/spottex-test` | produkční stroj |
+| Energetický backend (Flask, Celery, řízení střídačů) | `ondini/spottex_backend` | produkční stroj |
+| Ceníky / katalog nákladů | samostatný repozitář | zůstává na rserveru |
+
+Ceníky se nestěhují. Produkční stroj na ně sáhne přes **WireGuard tunel a VPS**,
+autentizace tokenem; `COSTS_INTERNAL_API_URL` proto míří na adresu uvnitř
+tunelu, nikdy na veřejný internet. Když je proměnná prázdná, katalog se jen
+vypne a zbytek aplikace běží dál — výpadek tunelu tedy web nepoloží.
+
+Žádný compose soubor se nepřipojuje k Docker síti jiného projektu. To by
+fungovalo jen na stroji, kde náhodou běží všechno pohromadě.
+
+### Postup na čistém stroji
+
+Předpoklady: Docker Engine, Docker Compose v2, WireGuard, reverse proxy s TLS.
+
+```bash
+# 1. Obě repozitáře, které na stroji poběží
+git clone git@github.com:ondini/spottex-test.git spottex
+git clone --branch prod git@github.com:ondini/spottex_backend.git spottex_backend
+
+# 2. Konfigurace platformy
+cd spottex
+cp deploy/env.production.example .env.production
+```
+
+V `.env.production` nahraďte **každý** placeholder. Bez těchto hodnot se
+nasazení nerozběhne nebo se rozběhne špatně:
+
+- `APP_URL`, `AUTH_URL` — HTTPS, jinak produkční validace start odmítne
+- `AUTH_SECRET`, `APP_ENCRYPTION_KEY` (musí dekódovat přesně na 32 bytů), `INTERNAL_JOB_TOKEN`
+- tři různá databázová hesla (owner, app, backup) a `BACKUP_ENCRYPTION_PASSPHRASE` uložená jinde než zálohy
+- `EMAIL_FROM` a buď Resend, nebo SMTP
+- `SPOTTEX_LEGACY_API_URL` (HTTPS) a `SPOTTEX_LEGACY_FERNET_KEY` vždy společně
+- `COSTS_INTERNAL_API_URL` + `COSTS_INTERNAL_API_KEY` — adresa uvnitř WireGuardu
+- `SPOTTEX_BACKEND_DATABASE_URL` — vyhrazená read-only role, nikdy owner backendu
+
+Backend potřebuje vlastní `.env` ve svém adresáři, a v něm navíc `HF_TOKEN`:
+repozitář `reframed-cz/PV_pred` je privátní a služba `model_sync` je blokující
+závislost pěti dalších služeb. Bez tokenu nenaběhne `control_broadcaster` ani
+`invertor_updater`. Adresář z `models_root` musí existovat a být zapisovatelný —
+modely si `model_sync` stáhne sám na revizi připnutou v `config/config.yaml`.
+
+```bash
+# 3. Ověřte interpolaci dřív, než cokoli nastartujete
+docker compose --env-file .env.production -f deploy/compose.prod.yml config --quiet
+
+# 4. Spusťte platformu (migrace proběhnou jako one-shot služba)
+docker compose --env-file .env.production -f deploy/compose.prod.yml up -d --build
+
+# 5. Backend zvlášť, ve svém adresáři
+cd ../spottex_backend && docker compose up -d --build
+```
+
+### Ověření
+
+```bash
+curl -fsS http://127.0.0.1:3005/api/health          # {"status":"ok","database":"connected"}
+docker compose -p spottex_backend logs model_sync   # musí skončit s kódem 0
+```
+
+Dál zkontrolujte, že `invertor_updater` čte střídače, že `prices_updater`
+zapisuje predikce, a že aplikace dosáhne na ceníky přes tunel.
+
+Seed spouštějte jen vědomě — každý běh přehashuje `ADMIN_SEED_PASSWORD`,
+zapíše ho adminovi a zvýší `authVersion`, čímž zneplatní jeho existující
+relace.
+
+### Tajemství
+
+Nic z výše uvedeného není v gitu a být nemá. Předání na cílový stroj potřebuje
+vlastní bezpečný kanál a jmenovitě určeného správce — stejně jako rotace klíčů,
+obnova zálohy a přístup k logům, když v noci selže řízení střídačů.
+
 ## Produkční nasazení přes Docker Compose
 
 Produkční stack očekává soubor `Secrets/spottex.production.env`. Interní klíče

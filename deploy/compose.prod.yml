@@ -111,10 +111,14 @@ services:
         condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Deliberately only the project's own network. The costs catalog and the
+    # energy backend are reached over their URLs (COSTS_INTERNAL_API_URL,
+    # SPOTTEX_BACKEND_DATABASE_URL, SPOTTEX_LEGACY_API_URL, GRIDLINK_API_URL),
+    # never by joining another project's Docker network -- that only works when
+    # every stack happens to sit on one host, and made this file impossible to
+    # start anywhere else. Those services may live on another machine entirely.
     networks:
       - default
-      - costs_data
-      - spottex_backend_prod
     read_only: true
     cap_drop: ["ALL"]
     security_opt:
@@ -334,10 +338,5 @@ volumes:
   spottex_db:
   spottex_backups:
 
-networks:
-  costs_data:
-    external: true
-    name: costs_data
-  spottex_backend_prod:
-    external: true
-    name: spottex_prod_net
+# No external networks on purpose -- see the app service. Everything outside this
+# stack is configuration, not topology, so the file starts on any host.
