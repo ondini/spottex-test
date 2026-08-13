@@ -348,7 +348,7 @@ Jednotkové testy jsou u doménových modulů v `src/**/*.test.ts`; E2E testy js
 
 ## Proměnné prostředí
 
-Lokální hodnoty jsou v `.env.example`; skutečné deployment hodnoty jsou v ignorovaných souborech `Secrets/spottex.development.env` a `Secrets/spottex.production.env`. Bezpečná veřejná šablona je v `Secrets/spottex.production.env.example`. Tajemství nikdy necommitujte.
+Lokální hodnoty jsou v `.env.example`; skutečné deployment hodnoty jsou v ignorovaných souborech `Secrets/spottex.development.env` a `.env.production`. Bezpečná veřejná šablona je v `deploy/env.production.example`. Tajemství nikdy necommitujte.
 Podrobný návod, kde jednotlivé hodnoty získat a jak nastavit Google Calendar,
 SolaX bridge, e-mail, GoPay a Meta Pixel, je v
 [`docs/INTEGRATIONS_AND_SECRETS.md`](docs/INTEGRATIONS_AND_SECRETS.md).
@@ -554,16 +554,17 @@ obnova zálohy a přístup k logům, když v noci selže řízení střídačů.
 
 ## Produkční nasazení přes Docker Compose
 
-Produkční stack očekává soubor `Secrets/spottex.production.env`. Interní klíče
-jsou v pracovním prostředí už vygenerované; externí integrace označené
-`DOPLNIT UŽIVATELEM` doplňte podle `Secrets/README.md`. Při vytváření čistého
-nasazení začněte šablonou a nastavte práva pouze pro provozního uživatele:
+Produkční stack očekává soubor `.env.production` v kořeni repozitáře. Jedinou
+šablonou je `deploy/env.production.example`; kopii nikdy necommitujte a nechte
+ji čitelnou pouze pro uživatele, který spouští Compose:
 
 ```bash
-cp Secrets/spottex.production.env.example Secrets/spottex.production.env
-sudo chown root:root Secrets/spottex.production.env
-sudo chmod 600 Secrets/spottex.production.env
+cp deploy/env.production.example .env.production
+chmod 600 .env.production
 ```
+
+Externí integrace, které nelze vygenerovat a musí přijít od vlastníka účtu, jsou
+popsané v [`docs/INTEGRATIONS_AND_SECRETS.md`](docs/INTEGRATIONS_AND_SECRETS.md).
 
 Nahraďte každý placeholder a zejména použijte tři různá databázová hesla a čtvrté samostatné tajemství pro backupy:
 
@@ -587,7 +588,7 @@ SPOTTEX_LEGACY_FERNET_KEY=<platny-32-byte-fernet-klic>
 ALLOW_INSECURE_LEGACY_HTTP=false
 ```
 
-Compose už nepoužívá `env_file`. Proměnné z `Secrets/spottex.production.env` slouží pouze k interpolaci a každá služba dostává explicitní minimální seznam. Proto musí být `--env-file Secrets/spottex.production.env` součástí každého produkčního Compose příkazu.
+Compose už nepoužívá `env_file`. Proměnné z `.env.production` slouží pouze k interpolaci a každá služba dostává explicitní minimální seznam. Proto musí být `--env-file .env.production` součástí každého produkčního Compose příkazu.
 
 Pokud aktualizujete prostředí, ve kterém už běžela starší vývojová verze konzultačního outboxu, před nasazením zkontrolujte nevyřízené CREATE úlohy verze 1. Aktuální worker záměrně přijímá jen šifrovaný snapshot verze 2, aby retry nikdy nezměnil cílový kalendář:
 
@@ -603,10 +604,10 @@ V tomto novém Spottex nasazení takové úlohy nevznikají. Pokud query při up
 Spuštění nebo aktualizace:
 
 ```bash
-sudo docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml config --quiet
-sudo docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml up -d --build
-sudo docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml ps
-sudo docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml logs -f migrate app jobs db_backup
+docker compose --env-file .env.production -f deploy/compose.prod.yml config --quiet
+docker compose --env-file .env.production -f deploy/compose.prod.yml up -d --build
+docker compose --env-file .env.production -f deploy/compose.prod.yml ps
+docker compose --env-file .env.production -f deploy/compose.prod.yml logs -f migrate app jobs db_backup
 ```
 
 Služba `migrate` se připojí jako DB owner, jednorázově provede `prisma migrate deploy` a následně vytvoří/aktualizuje omezené role a granty. `app` se spustí až po úspěšné migraci a `jobs` až po úspěšném healthchecku aplikace. Job runner zapisuje po úspěšném cyklu marker do svého tmpfs; pokud se žádný cyklus nedokončí 45 minut, jeho healthcheck přejde do `unhealthy`. Produkční monitoring musí upozorňovat na nezdravý stav `app`, `jobs`, `db` i `db_backup`.
@@ -616,7 +617,7 @@ Produkční aplikační image je Next standalone runtime bez zdrojového stromu 
 První seed spusťte vědomě až po úspěšném startu a s bezpečným `ADMIN_SEED_PASSWORD` z produkčního env. Runtime image seed nástroje neobsahuje, proto se používá migrátor:
 
 ```bash
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   run --rm migrate npx tsx prisma/seed.ts
 ```
 
@@ -640,12 +641,12 @@ Docker health status je lokální signál, nikoli doručovací kanál. V produk�
 
 ```bash
 # Seznam šifrovaných dumpů uvnitř backup kontejneru
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec db_backup sh -lc 'ls -lh /backups/*.dump.enc'
 
 # Zkopírování konkrétního šifrovaného dumpu na host
 mkdir -p backups
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml cp \
+docker compose --env-file .env.production -f deploy/compose.prod.yml cp \
   db_backup:/backups/spottex-YYYYMMDD-HHMMSS.dump.enc \
   ./backups/
 ```
@@ -656,7 +657,7 @@ Ruční šifrovaný dump lze vytvořit přímo na hostu bez mezilehlého plainte
 
 ```bash
 mkdir -p backups
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db_backup sh -lc \
   'set -o pipefail; PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_ENCRYPTION_PASSPHRASE' \
   > "backups/spottex-manual-$(date +%Y%m%d-%H%M%S).dump.enc"
@@ -669,23 +670,23 @@ Obnovu pravidelně nacvičujte do dočasné databáze, ne přes produkční data
 ```bash
 set -o pipefail
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" dropdb -h 127.0.0.1 -U "$POSTGRES_USER" --maintenance-db=postgres --if-exists --force spottex_restore_test && PGPASSWORD="$POSTGRES_PASSWORD" createdb -h 127.0.0.1 -U "$POSTGRES_USER" --maintenance-db=postgres spottex_restore_test'
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   run --rm --no-deps -T db_backup \
   openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_ENCRYPTION_PASSPHRASE \
   < backups/spottex-YYYYMMDD-HHMMSS.dump.enc | \
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h 127.0.0.1 -U "$POSTGRES_USER" -d spottex_restore_test --no-owner --exit-on-error'
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d spottex_restore_test -c "SELECT count(*) FROM general.users;"'
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" dropdb -h 127.0.0.1 -U "$POSTGRES_USER" --maintenance-db=postgres --if-exists --force spottex_restore_test'
 ```
@@ -697,24 +698,24 @@ Produkční restore je destruktivní operace. Nejprve vytvořte aktuální šifr
 ```bash
 set -o pipefail
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   stop app jobs db_backup
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" dropdb -h 127.0.0.1 -U "$POSTGRES_USER" --maintenance-db=postgres --if-exists --force "$POSTGRES_DB" && PGPASSWORD="$POSTGRES_PASSWORD" createdb -h 127.0.0.1 -U "$POSTGRES_USER" --maintenance-db=postgres "$POSTGRES_DB"'
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   run --rm --no-deps -T db_backup \
   openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_ENCRYPTION_PASSPHRASE \
   < backups/spottex-YYYYMMDD-HHMMSS.dump.enc | \
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   exec -T db sh -lc \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error'
 
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   run --rm migrate
-docker compose --env-file Secrets/spottex.production.env -f deploy/compose.prod.yml \
+docker compose --env-file .env.production -f deploy/compose.prod.yml \
   up -d app jobs db_backup
 curl -fsS http://127.0.0.1:3005/api/health
 ```

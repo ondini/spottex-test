@@ -1,7 +1,7 @@
 # Externí tokeny — co dodat před produkcí
 
 Tento soubor neobsahuje žádné tajné hodnoty. Skutečné tokeny patří do
-`Secrets/spottex.production.env`, který je ignorovaný Gitem.
+`.env.production`, který je ignorovaný Gitem.
 
 ## Teď nutné: odesílání e-mailů
 
@@ -24,7 +24,7 @@ Postup:
 4. V **API Keys** vytvořte klíč s oprávněním pouze pro odesílání; pokud Resend
    nabízí omezení na doménu, omezte jej na ověřenou doménu Spottexu.
 5. Klíč se zobrazí pouze při vytvoření. Vložte jej do
-   `Secrets/spottex.production.env` jako `RESEND_API_KEY`.
+   `.env.production` jako `RESEND_API_KEY`.
 6. Pokud ověříte subdoménu `mail.spottex.cz`, změňte také `EMAIL_FROM`, aby
    odesílatel používal tutéž ověřenou subdoménu.
 
@@ -78,7 +78,7 @@ node scripts/import-legacy-secret.mjs
 ```
 
 Příkaz nastaví hostitelský `.env`, `Secrets/spottex.development.env` a převezme
-klíč také do `Secrets/spottex.production.env`. Produkční URL úmyslně nenastavuje:
+klíč také do `.env.production`. Produkční URL úmyslně nenastavuje:
 nejprve musí existovat interní HTTPS reverse proxy před původním portem `2086`.
 Přímé veřejné zpřístupnění tohoto HTTP portu není bezpečné.
 
@@ -111,17 +111,16 @@ Produkční údaje se vydávají samostatně až po schválení integrace.
 Upravte pouze:
 
 ```text
-/home/web/spottex/Secrets/spottex.production.env
+/home/web/spottex/.env.production
 ```
 
 Poté:
 
 ```bash
-sudo chown root:root /home/web/spottex/Secrets/spottex.production.env
-sudo chmod 600 /home/web/spottex/Secrets/spottex.production.env
-sudo docker compose --env-file /home/web/spottex/Secrets/spottex.production.env \
+chmod 600 /home/web/spottex/.env.production
+docker compose --env-file /home/web/spottex/.env.production \
   -f /home/web/spottex/deploy/compose.prod.yml config --quiet
-sudo docker compose --env-file /home/web/spottex/Secrets/spottex.production.env \
+docker compose --env-file /home/web/spottex/.env.production \
   -f /home/web/spottex/deploy/compose.prod.yml up -d --build
 ```
 

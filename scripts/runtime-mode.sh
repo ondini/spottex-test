@@ -5,7 +5,7 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root_dir"
 
 dev_env="Secrets/spottex.development.env"
-prod_env="Secrets/spottex.production.env"
+prod_env=".env.production"
 
 case "${1:-status}" in
   dev)

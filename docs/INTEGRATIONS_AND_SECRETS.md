@@ -1,14 +1,14 @@
 # Integrace a secrets Spottex
 
 Tento soubor je provozní checklist. Skutečné secrets patří pouze do ignorovaných
-souborů ve složce `Secrets/` nebo do externího secret manageru. Nikdy je
-nevkládejte do Gitu, Figmy, ticketu ani do klientského JavaScriptu.
+env souborů nebo do externího secret manageru. Nikdy je nevkládejte do Gitu,
+Figmy, ticketu ani do klientského JavaScriptu.
 
 Výchozí šablony:
 
 - lokální vývoj: `Secrets/spottex.development.env`
-- produkce: `Secrets/spottex.production.env`
-- bezpečná šablona: `Secrets/spottex.production.env.example`
+- produkce: `.env.production` v kořeni repozitáře
+- jediná produkční šablona: `deploy/env.production.example`
 
 Interní podpisové a šifrovací klíče i databázová hesla jsou v místních env
 souborech již vygenerované. Vy doplňujete pouze hodnoty označené komentářem
@@ -166,7 +166,7 @@ se pouze po marketingovém souhlasu návštěvníka.
 npm run db:generate
 npm run db:deploy
 npm run preflight
-sudo docker compose --env-file Secrets/spottex.production.env \
+docker compose --env-file .env.production \
   -f deploy/compose.prod.yml config
 ```
 

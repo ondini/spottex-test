@@ -56,7 +56,7 @@ upsertEnvironmentFile("Secrets/spottex.development.env", {
   ALLOW_INSECURE_LEGACY_HTTP: "true",
 });
 
-upsertEnvironmentFile("Secrets/spottex.production.env", {
+upsertEnvironmentFile(".env.production", {
   SPOTTEX_LEGACY_FERNET_KEY: fernetKey,
 });
 

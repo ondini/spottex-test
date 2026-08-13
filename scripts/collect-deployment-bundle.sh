@@ -68,6 +68,26 @@ for candidate in "$REPO_ROOT/.env.production" "$REPO_ROOT/Secrets/spottex.produc
 done
 [ -n "$PLATFORM_ENV" ] || { echo "No .env.production or Secrets/spottex.production.env found" >&2; exit 1; }
 
+# Always say which file is being packaged. The Secrets/ path is the superseded
+# location; a bundle silently built from a stale copy of it is worse than no
+# bundle, because the stack starts and only the missing features are dead.
+echo "Platform environment: $PLATFORM_ENV" >&2
+case "$PLATFORM_ENV" in
+  */Secrets/spottex.production.env)
+    note_problem "platform: $PLATFORM_ENV is the superseded location. Production config now lives in .env.production, built from deploy/env.production.example. Migrate it and re-run -- an old copy is likely missing keys that were added since." ;;
+esac
+
+# Keys that were added after the Secrets/ template was retired. None of them
+# break startup (compose defaults them away), so nothing fails loudly on the
+# target host -- the features just never work. Check them by hand.
+MISSING_RECENT=()
+for key in COSTS_INTERNAL_API_URL SPOTTEX_BACKEND_DATABASE_URL ENERGY_SUPPLIER_MODE; do
+  grep -qE "^${key}=" "$PLATFORM_ENV" || MISSING_RECENT+=("$key")
+done
+if [ "${#MISSING_RECENT[@]}" -gt 0 ]; then
+  note_problem "platform: keys absent from the file entirely (not merely empty): ${MISSING_RECENT[*]}. Compare against deploy/env.production.example -- these default to off and disable the costs catalog, spot-price sync or supplier comparison without any error."
+fi
+
 for key in APP_URL AUTH_URL AUTH_SECRET APP_ENCRYPTION_KEY INTERNAL_JOB_TOKEN \
            DATABASE_URL DATABASE_ADMIN_URL EMAIL_FROM \
            POSTGRES_PASSWORD POSTGRES_APP_PASSWORD POSTGRES_BACKUP_PASSWORD \
