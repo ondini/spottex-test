@@ -8,7 +8,11 @@ Spottex is a Czech-language full-stack solar-energy optimization platform built 
 
 `legacy-flutter-app/` is a read-only snapshot of the existing online Flutter application. It is a visual/data-contract reference only, is ignored by Docker, and must not become a Next.js route or build input.
 
+`backend-customer-journey/` is a stale linked worktree of someone else's backend clone (`/home/anna/…`), gitignored here and not part of any build or deployment. Its thirteen "uncommitted" files look like unsaved work but are not: they were snapshotted into backend commit `fa45538` on 2026-08-10 and pushed, and the worktree has since fallen behind the LightGBM cutover. Do not treat it as a source of truth, do not deploy from it, and do not spend time reconciling it — the backend that actually runs is a separate clone, see below.
+
 The existing production Spottex and GridLink energy services are external dependencies. This repository must not modify, restart, redeploy, or assume ownership of them. The new platform calls them through server-side adapters; default local endpoints are ports `2086` and `45992`.
+
+On this development host the energy backend runs from a bind mount of its own clone rather than a baked image, so the running code is exactly that working tree — there is no image drift to chase. The two-step SolaX onboarding (`/discover_plants`, `/register_selected`) exists only on the backend branch `feature/customer-journey`; neither `dev` nor `prod` has those endpoints, and that branch is an unreviewed work-in-progress checkpoint. Any host that needs plant onboarding has to run that branch deliberately.
 
 ## Primary commands
 
@@ -294,7 +298,7 @@ Before considering a production deployment complete, confirm:
 ## Repository discipline
 
 - Preserve unrelated working-tree changes; this repository may be edited by multiple agents concurrently.
-- Do not edit generated `.next`, `tsconfig.tsbuildinfo`, Prisma client output, or the Flutter snapshot.
+- Do not edit generated `.next`, `tsconfig.tsbuildinfo`, Prisma client output, the Flutter snapshot, or the `backend-customer-journey/` worktree.
 - Use existing APIs and service layers rather than importing Prisma into client components.
 - Keep secrets server-only and return stable, non-sensitive API errors.
 - Use Zod at API boundaries and database transactions for multi-record invariants.
