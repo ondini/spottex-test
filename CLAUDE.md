@@ -50,6 +50,8 @@ The database service is named `web-db`, not `db`. `deploy/compose.full.yml` merg
 
 `deploy/compose.full.yml` runs both halves of the system as a single project. It includes the backend repository's compose file rather than copying it, so that repository stays the owner of its services; override the location with `SPOTTEX_BACKEND_COMPOSE`. In the merged project the app reaches the backend at `http://web:2086` and `db:5432` over the project network. Never start it alongside a separately running `spottex_backend` project — both would bind `2086`/`5434` and both would drive `control_broadcaster` and the inverter workers against the same real inverters.
 
+`deploy/compose.dev-build.yml` is an override that swaps `app` and `analysis-worker` for a production build of the same `Dockerfile` production uses, because the dev server is too slow on a shared remote host. It drops the source bind mount, so hot reload is gone and every change needs a rebuild, and it adds an `app-migrate` one-shot to replace the migrations the dev start command used to run. The build image always runs `NODE_ENV=production` and therefore enforces the production environment contract, so the override supplies what this host needs — `PAYMENT_PROVIDER=FREE`, `DEV_AUTO_VERIFY_EMAIL=false`, `TRUST_PROXY_HEADERS=true`, a required `RESEND_API_KEY` because Mailpit is loopback-only and accounts are no longer auto-verified, and `ALLOW_INSECURE_LEGACY_HTTP=true` because the energy backend answers on the project network without TLS. That last override is acceptable only on a development machine and must never become the pattern for a publicly reachable host.
+
 Local ports:
 
 - application: `127.0.0.1:3004`

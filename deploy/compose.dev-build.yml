@@ -1,0 +1,79 @@
+# Runs the shared development host from a production build instead of the
+# Next.js dev server, which is slow enough on a remote host to get in the way
+# of testing. Layer it on top of the development stack:
+#
+#   docker compose --env-file Secrets/spottex.development.env --env-file .env \
+#     -f deploy/compose.full.yml -f deploy/compose.dev-build.yml up -d --build app analysis-worker
+#
+# The trade is hot reload: the source tree is no longer mounted, so every code
+# change needs `up -d --build app` again. The database, Mailpit and the energy
+# backend stay exactly as the development stack defines them.
+#
+# The build image always runs with NODE_ENV=production, so it enforces the
+# production environment contract at startup. The overrides below are what that
+# contract requires of this host, and each one is a deliberate statement about
+# a development machine, not a template for production.
+
+services:
+  # Migrations ride along with the dev server's start command, which the build
+  # image does not have. This one-shot restores them.
+  app-migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: builder
+    restart: "no"
+    command: npx prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
+    depends_on:
+      web-db:
+        condition: service_healthy
+    networks:
+      - default
+
+  app:
+    build:
+      dockerfile: Dockerfile
+      target: runner
+    # The image carries the built application; mounting the source over /app
+    # would hide it, and the dev server command no longer exists.
+    volumes: !reset []
+    command: !reset null
+    environment:
+      # Production mode refuses to hand out verified accounts, so testers
+      # confirm their address like any real user would.
+      DEV_AUTO_VERIFY_EMAIL: "false"
+      # nginx on this host terminates the request and sets the forwarded
+      # headers; without this the client address is read as the proxy's.
+      TRUST_PROXY_HEADERS: "true"
+      # MOCK is a development-only provider and production mode rejects it.
+      # FREE matches what production actually runs.
+      PAYMENT_PROVIDER: FREE
+      # The energy backend answers on the project network, where there is no
+      # TLS to terminate. On a host reachable from the internet this override
+      # would not be acceptable.
+      ALLOW_INSECURE_LEGACY_HTTP: "true"
+      # Verification links have to reach a real inbox: Mailpit is bound to
+      # loopback and testers cannot open it.
+      RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver verification e-mail from the build}
+      # Configured Google OAuth means all three values or none. This host has
+      # the callback but no client, so pass the callback only once a client id
+      # exists and let the pair stay empty until then.
+      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_CLIENT_ID:+${GOOGLE_CALENDAR_REDIRECT_URI}}
+    depends_on:
+      app-migrate:
+        condition: service_completed_successfully
+
+  analysis-worker:
+    build:
+      dockerfile: Dockerfile
+      target: analysis-worker
+    volumes: !reset []
+    command: !reset null
+    environment:
+      TRUST_PROXY_HEADERS: "true"
+      RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver the finished-analysis e-mail}
+    depends_on:
+      app-migrate:
+        condition: service_completed_successfully

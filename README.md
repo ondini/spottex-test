@@ -235,6 +235,42 @@ docker compose --env-file Secrets/spottex.development.env \
   -f deploy/compose.full.yml up -d
 ```
 
+## Sdílený vývojový host z buildu: `deploy/compose.dev-build.yml`
+
+Next.js dev server je na vzdáleném hostu (např. `dev1.spottex.cz`) natolik
+pomalý, že překáží testování. Tento override vymění `app` a `analysis-worker`
+za produkční build ze stejného `Dockerfile`, jaký používá produkce, a zbytek
+stacku (databáze, Mailpit, energetický backend) nechá beze změny:
+
+```bash
+docker compose --env-file Secrets/spottex.development.env --env-file .env \
+  -f deploy/compose.full.yml -f deploy/compose.dev-build.yml up -d --build app analysis-worker
+```
+
+Za rychlost se platí hot reloadem: zdrojový strom se už nemountuje, takže
+každá změna kódu vyžaduje znovu `up -d --build app`. Migrace, které dřív
+spouštěl startovací příkaz dev serveru, obstarává jednorázová služba
+`app-migrate`.
+
+Build image vždy běží s `NODE_ENV=production`, takže při startu vynutí
+produkční kontrakt prostředí. Override proto dorovnává, co tento host
+potřebuje — `PAYMENT_PROVIDER=FREE` místo vývojového `MOCK`,
+`DEV_AUTO_VERIFY_EMAIL=false`, `TRUST_PROXY_HEADERS=true` a
+`ALLOW_INSECURE_LEGACY_HTTP=true`, protože energetický backend odpovídá na
+projektové síti bez TLS. **Poslední jmenované je přípustné jen na vývojovém
+stroji; na veřejně dostupném hostu musí legacy API běžet přes interní TLS.**
+
+Protože se e-maily neověřují automaticky a Mailpit poslouchá jen na loopbacku,
+musí být nastavený `RESEND_API_KEY` — jinak se testeři k ověřovacímu odkazu
+nedostanou. Compose bez něj odmítne stack spustit.
+
+Návrat na dev server je vynechání override souboru:
+
+```bash
+docker compose --env-file Secrets/spottex.development.env --env-file .env \
+  -f deploy/compose.full.yml up -d --build app analysis-worker
+```
+
 ## Lokální start na hostu
 
 Požadavky: Node.js 22, npm, Docker Compose v2. PostgreSQL a Mailpit mohou běžet v kontejnerech, zatímco Next.js běží přímo na hostu.
