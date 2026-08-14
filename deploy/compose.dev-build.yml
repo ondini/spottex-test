@@ -13,6 +13,11 @@
 # production environment contract at startup. The overrides below are what that
 # contract requires of this host, and each one is a deliberate statement about
 # a development machine, not a template for production.
+#
+# No mail leaves this host: everything is captured by Mailpit, and accounts are
+# created already verified so nobody is waiting for a link that cannot arrive.
+# That makes the host trust-on-sight — anyone who reaches it can sign in as any
+# address they type — which is the reason it must stay internal.
 
 services:
   # Migrations ride along with the dev server's start command, which the build
@@ -41,9 +46,13 @@ services:
     volumes: !reset []
     command: !reset null
     environment:
-      # Production mode refuses to hand out verified accounts, so testers
-      # confirm their address like any real user would.
-      DEV_AUTO_VERIFY_EMAIL: "false"
+      # This host's domain is not set up with a mail provider, so a
+      # verification link would never arrive and nobody could finish signing
+      # up. Accounts are therefore created already verified, which also means
+      # anyone who reaches this host can sign in as any address they type.
+      # Acceptable for an internal testing host and nowhere else.
+      DEV_AUTO_VERIFY_EMAIL: "true"
+      ALLOW_AUTO_VERIFIED_ACCOUNTS: "true"
       # nginx on this host terminates the request and sets the forwarded
       # headers; without this the client address is read as the proxy's.
       TRUST_PROXY_HEADERS: "true"
@@ -54,13 +63,14 @@ services:
       # TLS to terminate. On a host reachable from the internet this override
       # would not be acceptable.
       ALLOW_INSECURE_LEGACY_HTTP: "true"
-      # Verification links have to reach a real inbox: Mailpit is bound to
-      # loopback and testers cannot open it.
-      RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver verification e-mail from the build}
-      # Mailpit accepts any sender, a real provider does not. The development
-      # default is noreply@spottex.local, which Resend rejects because the
-      # domain cannot be verified.
-      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM to an address on a domain verified with the mail provider}
+      # Mail is captured by Mailpit on the project network, so nothing this
+      # host generates reaches a real inbox and no provider or verified sending
+      # domain is needed. That connection has no TLS to enable.
+      ALLOW_INSECURE_SMTP: "true"
+      # Resend takes precedence wherever a key exists, and a key left in the
+      # environment file would send this host's mail for real from a sender
+      # domain it cannot verify. Capture everything locally instead.
+      RESEND_API_KEY: ""
       # Configured Google OAuth means all three values or none. This host has
       # the callback but no client, so pass the callback only once a client id
       # exists and let the pair stay empty until then.
@@ -77,8 +87,11 @@ services:
     command: !reset null
     environment:
       TRUST_PROXY_HEADERS: "true"
-      RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver the finished-analysis e-mail}
-      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM to an address on a domain verified with the mail provider}
+      ALLOW_INSECURE_SMTP: "true"
+      # Resend takes precedence wherever a key exists, and a key left in the
+      # environment file would send this host's mail for real from a sender
+      # domain it cannot verify. Capture everything locally instead.
+      RESEND_API_KEY: ""
     depends_on:
       app-migrate:
         condition: service_completed_successfully

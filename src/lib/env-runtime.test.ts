@@ -53,6 +53,20 @@ describe("production environment validation", () => {
     expect(() => validateProductionEnvironment()).not.toThrow();
   });
 
+  it("keeps pre-verified accounts out of production unless explicitly allowed", () => {
+    validProductionEnvironment();
+    vi.stubEnv("DEV_AUTO_VERIFY_EMAIL", "true");
+    expect(() => validateProductionEnvironment()).toThrow(/DEV_AUTO_VERIFY_EMAIL/);
+
+    // A testing host whose domain cannot send mail says so on purpose, and the
+    // start announces it so the relaxation cannot go unnoticed.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("ALLOW_AUTO_VERIFIED_ACCOUNTS", "true");
+    expect(() => validateProductionEnvironment()).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("ALLOW_AUTO_VERIFIED_ACCOUNTS"));
+    warn.mockRestore();
+  });
+
   it("rejects non-origin application URLs and untrusted GoPay hosts", () => {
     validProductionEnvironment();
     vi.stubEnv("APP_URL", "https://spottex.cz/nested");
@@ -61,6 +75,19 @@ describe("production environment validation", () => {
     validProductionEnvironment();
     vi.stubEnv("GOPAY_API_URL", "https://gopay.cz.attacker.test/api");
     expect(() => validateProductionEnvironment()).toThrow(/GOPAY_API_URL/);
+  });
+
+  it("allows a capture mailbox without TLS only when explicitly permitted", () => {
+    validProductionEnvironment();
+    vi.stubEnv("SMTP_SECURE", "false");
+    vi.stubEnv("SMTP_STARTTLS", "false");
+    expect(() => validateProductionEnvironment()).toThrow(/exactly one/);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("ALLOW_INSECURE_SMTP", "true");
+    expect(() => validateProductionEnvironment()).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("ALLOW_INSECURE_SMTP"));
+    warn.mockRestore();
   });
 
   it("requires exactly one SMTP TLS mode and a positive GoPay id", () => {

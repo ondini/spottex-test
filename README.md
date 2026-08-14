@@ -260,9 +260,18 @@ potřebuje — `PAYMENT_PROVIDER=FREE` místo vývojového `MOCK`,
 projektové síti bez TLS. **Poslední jmenované je přípustné jen na vývojovém
 stroji; na veřejně dostupném hostu musí legacy API běžet přes interní TLS.**
 
-Protože se e-maily neověřují automaticky a Mailpit poslouchá jen na loopbacku,
-musí být nastavený `RESEND_API_KEY` — jinak se testeři k ověřovacímu odkazu
-nedostanou. Compose bez něj odmítne stack spustit.
+Z tohoto hostu **neodchází žádná reálná pošta**. Doména dev1 není nastavená u
+poštovního poskytovatele, takže by ověřovací odkaz stejně nedorazil; účty se
+proto zakládají rovnou ověřené (`ALLOW_AUTO_VERIFIED_ACCOUNTS=true`) a všechny
+zprávy zachytává Mailpit přes nešifrované SMTP na projektové síti
+(`ALLOW_INSECURE_SMTP=true`). Případný `RESEND_API_KEY` z env souboru se
+záměrně přepisuje na prázdný, aby se pošta neposlala doopravdy.
+
+**Důsledek: kdokoli, kdo se na tento host dostane, se přihlásí pod libovolnou
+adresou, kterou napíše.** Proto musí zůstat interní. Obě proměnné
+`ALLOW_AUTO_VERIFIED_ACCOUNTS` a `ALLOW_INSECURE_SMTP` produkční Compose nikdy
+nenastavuje a bez nich runtime validace obojí odmítne; při startu se navíc
+vypíše varování, aby to nezapadlo.
 
 Návrat na dev server je vynechání override souboru:
 

@@ -24,7 +24,19 @@ export function validateProductionEnvironment() {
   required("INTERNAL_JOB_TOKEN", 32);
   const encryptionKey = Buffer.from(required("APP_ENCRYPTION_KEY"), "base64");
   if (encryptionKey.length !== 32) throw new Error("APP_ENCRYPTION_KEY must decode to exactly 32 bytes");
-  if (process.env.DEV_AUTO_VERIFY_EMAIL === "true") throw new Error("DEV_AUTO_VERIFY_EMAIL cannot be enabled in production");
+  // A build always reports NODE_ENV=production, including on a shared testing
+  // host where nobody can receive verification mail because its domain is not
+  // set up with a mail provider. Handing out pre-verified accounts there is a
+  // deliberate, per-deployment decision, so it takes its own explicit switch
+  // and announces itself on every start. Production never sets it.
+  if (process.env.DEV_AUTO_VERIFY_EMAIL === "true") {
+    if (process.env.ALLOW_AUTO_VERIFIED_ACCOUNTS !== "true") {
+      throw new Error("DEV_AUTO_VERIFY_EMAIL cannot be enabled in production");
+    }
+    console.warn(
+      "[env] ALLOW_AUTO_VERIFIED_ACCOUNTS is on: accounts are created already verified and anyone who can reach this host can sign in without owning the address. Never enable this on a production deployment.",
+    );
+  }
   if (process.env.TRUST_PROXY_HEADERS !== "true") throw new Error("TRUST_PROXY_HEADERS must be true behind the production reverse proxy");
   required("EMAIL_FROM");
   if (process.env.RESEND_API_KEY) {
@@ -35,7 +47,18 @@ export function validateProductionEnvironment() {
     if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) throw new Error("SMTP_PORT is invalid");
     const implicitTls = process.env.SMTP_SECURE === "true";
     const startTls = process.env.SMTP_STARTTLS === "true";
-    if (implicitTls === startTls) throw new Error("Enable exactly one of SMTP_SECURE or SMTP_STARTTLS in production");
+    // A testing host delivers to a capture mailbox on its own project network,
+    // where there is no transport to protect and no TLS on offer. Everywhere
+    // else, mail carries verification links and personal data and must not
+    // cross the network in the clear.
+    if (implicitTls === startTls && process.env.ALLOW_INSECURE_SMTP !== "true") {
+      throw new Error("Enable exactly one of SMTP_SECURE or SMTP_STARTTLS in production");
+    }
+    if (implicitTls === startTls) {
+      console.warn(
+        "[env] ALLOW_INSECURE_SMTP is on: mail leaves this host over an unencrypted SMTP connection. Never enable this on a production deployment.",
+      );
+    }
     if (Boolean(process.env.SMTP_USER) !== Boolean(process.env.SMTP_PASSWORD)) throw new Error("SMTP_USER and SMTP_PASSWORD must be configured together");
     if (process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
       required("SMTP_USER");
