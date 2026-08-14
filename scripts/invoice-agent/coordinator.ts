@@ -15,12 +15,18 @@ const parserToken = process.env.INVOICE_PARSER_TOKEN ?? "";
 // carry the token. Refuse to start rather than poll a remote parser unarmed and
 // discover it only through a stream of 401s.
 if (parserUrl) {
-  const host = new URL(parserUrl).hostname;
+  const parsed = new URL(parserUrl);
+  const host = parsed.hostname;
   const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
   if (!loopback && parserToken.length < 32) {
     throw new Error(
       "INVOICE_PARSER_TOKEN of at least 32 characters is required when INVOICE_PARSER_URL is not loopback",
     );
+  }
+  // This module speaks plain HTTP; the tunnel is what protects the hop. Saying
+  // so at startup beats a connection that fails only when a document arrives.
+  if (parsed.protocol !== "http:") {
+    throw new Error("INVOICE_PARSER_URL must use http:; the tunnel provides the transport security");
   }
 }
 const pollMs = Math.max(1_000, Number(process.env.INVOICE_AGENT_POLL_MS ?? 10_000));
@@ -85,6 +91,23 @@ async function claimNext(): Promise<ClaimedDocument | null> {
   });
 }
 
+/**
+ * A URL keeps every part on its prototype, so spreading one into
+ * `http.RequestOptions` contributes nothing at all: the request kept none of
+ * the host, port or path and quietly went to localhost:80 instead of the
+ * parser. Name the fields explicitly.
+ */
+function parserHttpOptions(base: string): http.RequestOptions {
+  const target = new URL("/parse", base);
+  return {
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port || 80,
+    path: `${target.pathname}${target.search}`,
+    method: "POST",
+  };
+}
+
 function parseWithIsolatedWorker(document: ClaimedDocument, content: Buffer): Promise<unknown> {
   const body = Buffer.from(JSON.stringify({
     mimeType: document.mimeType,
@@ -92,7 +115,7 @@ function parseWithIsolatedWorker(document: ClaimedDocument, content: Buffer): Pr
   }));
   return new Promise((resolve, reject) => {
     const requestOptions: http.RequestOptions = parserUrl
-      ? { ...new URL("/parse", parserUrl), method: "POST" }
+      ? parserHttpOptions(parserUrl)
       : { socketPath, path: "/parse", method: "POST" };
     const request = http.request({
       ...requestOptions,
