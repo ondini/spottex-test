@@ -36,6 +36,18 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
 
+/**
+ * Auth.js resolves a relative `callbackUrl` against AUTH_URL, so letting it own
+ * the redirect sends everyone to whatever host that variable names — localhost
+ * for anyone reaching the app through its real domain. Ending the session
+ * without a redirect and navigating relatively keeps the browser on the host
+ * the user is actually on, whichever domain that is.
+ */
+async function signOutHere() {
+  await signOut({ redirect: false });
+  window.location.assign("/prihlaseni");
+}
+
 type ShellUser = {
   name?: string | null;
   email: string;
@@ -290,7 +302,7 @@ export function AppShell({
                 )}
                 <button
                   type="button"
-                  onClick={() => signOut({ callbackUrl: "/prihlaseni" })}
+                  onClick={() => void signOutHere()}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-error-600 hover:bg-error-50"
                 >
                   <LogOut className="size-4.5" /> Odhlásit se

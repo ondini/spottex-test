@@ -37,8 +37,12 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
-      APP_URL: http://localhost:3004
-      AUTH_URL: http://localhost:3004
+      # A shared development host is reached through its own domain, and these
+      # two decide where verification links, password resets and the OAuth
+      # callback point. Hard-coding them sent everyone back to localhost, so
+      # the environment file wins and plain local work still needs no setup.
+      APP_URL: ${APP_URL:-http://localhost:3004}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3004}
       AUTH_SECRET: ${AUTH_SECRET:?Use --env-file Secrets/spottex.development.env}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
       INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:?Use --env-file Secrets/spottex.development.env}
@@ -87,7 +91,8 @@ services:
     environment:
       DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
-      APP_URL: http://localhost:3004
+      # This worker writes the links in the finished-analysis e-mail.
+      APP_URL: ${APP_URL:-http://localhost:3004}
       EMAIL_FROM: Spottex <noreply@spottex.local>
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
