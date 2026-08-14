@@ -57,6 +57,10 @@ services:
       # Verification links have to reach a real inbox: Mailpit is bound to
       # loopback and testers cannot open it.
       RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver verification e-mail from the build}
+      # Mailpit accepts any sender, a real provider does not. The development
+      # default is noreply@spottex.local, which Resend rejects because the
+      # domain cannot be verified.
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM to an address on a domain verified with the mail provider}
       # Configured Google OAuth means all three values or none. This host has
       # the callback but no client, so pass the callback only once a client id
       # exists and let the pair stay empty until then.
@@ -74,6 +78,7 @@ services:
     environment:
       TRUST_PROXY_HEADERS: "true"
       RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY to deliver the finished-analysis e-mail}
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM to an address on a domain verified with the mail provider}
     depends_on:
       app-migrate:
         condition: service_completed_successfully
