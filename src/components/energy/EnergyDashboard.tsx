@@ -306,14 +306,42 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
   if (compact && !open) {
     return (
       <button type="button" className="app-button app-button-secondary" onClick={() => setOpen(true)}>
-        <Link2 className="size-4" /> Připojit SolaX Cloud
+        <Link2 className="size-4" /> Připojit elektrárnu
       </button>
     );
   }
 
   return (
     <section className={`${compact ? "app-card mt-5" : emptyState ? "app-card w-full" : "mx-auto w-full max-w-lg"} p-5 sm:p-6`}>
-      {emptyState && <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Připojte svoji elektrárnu</h1>}
+      {emptyState && (
+        <div className="max-w-2xl">
+          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Připojte svoji elektrárnu</h1>
+          {/* "SolaX Cloud" means nothing to most owners. Describe the login by
+              what they already do with it instead of by its product name. */}
+          <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+            Přihlaste se stejnými údaji, kterými se běžně díváte na svoji
+            fotovoltaiku — v mobilní aplikaci nebo na webu, kde vidíte výrobu,
+            spotřebu a stav baterie. Účet vám nejčastěji zakládala firma, která
+            elektrárnu instalovala.
+          </p>
+          <div className="mt-4 grid gap-2 text-sm leading-6 text-slate-600 sm:grid-cols-2">
+            <p className="flex gap-2 rounded-xl bg-slate-50 px-3 py-2">
+              <SunMedium className="mt-0.5 size-4 shrink-0 text-brand-600" />
+              <span>
+                Zatím umíme elektrárny <strong className="text-slate-900">SolaX</strong> — aplikace
+                SolaX Cloud nebo SolaX View. Další značky připravujeme.
+              </span>
+            </p>
+            <p className="flex gap-2 rounded-xl bg-slate-50 px-3 py-2">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-brand-600" />
+              <span>
+                Data jen čteme, nic v elektrárně neměníme. Přihlašovací údaje
+                ukládáme šifrovaně.
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
       {!configured && (
         <p className="mt-5 rounded-xl bg-warning-50 px-4 py-3 text-sm leading-6 text-warning-600">
           Read-only konektor zatím není na tomto serveru nakonfigurovaný. Správce musí doplnit interní API adresu a Fernet klíč podle <code>docs/INTEGRATIONS_AND_SECRETS.md</code>.
@@ -321,13 +349,13 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
       )}
       <form onSubmit={submit} className={`grid gap-3 ${emptyState ? "mt-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end" : "mt-5 sm:grid-cols-2"}`}>
         {plants.length === 0 ? <>
-          <label className={`text-sm font-medium text-slate-700 ${emptyState ? "lg:h-full" : ""}`}>
-            <span className={emptyState ? "sr-only" : undefined}>E-mail do SolaX Cloud</span>
-            <input className={`app-input ${emptyState ? "lg:h-full" : "mt-1.5"}`} type="email" name="email" autoComplete="email" placeholder={emptyState ? "E-mail do SolaX Cloud" : undefined} required disabled={!configured} />
+          <label className="text-sm font-medium text-slate-700">
+            E-mail, kterým se přihlašujete k elektrárně
+            <input className="app-input mt-1.5" type="email" name="email" autoComplete="email" placeholder="vas@email.cz" required disabled={!configured} />
           </label>
-          <label className={`text-sm font-medium text-slate-700 ${emptyState ? "lg:h-full" : ""}`}>
-            <span className={emptyState ? "sr-only" : undefined}>Heslo do SolaX Cloud</span>
-            <input className={`app-input ${emptyState ? "lg:h-full" : "mt-1.5"}`} type="password" name="password" autoComplete="current-password" placeholder={emptyState ? "Heslo do SolaX Cloud" : undefined} required disabled={!configured} />
+          <label className="text-sm font-medium text-slate-700">
+            Heslo k tomuto přihlášení
+            <input className="app-input mt-1.5" type="password" name="password" autoComplete="current-password" required disabled={!configured} />
           </label>
         </> : <div className={`${emptyState ? "lg:col-span-3" : "sm:col-span-2"} grid gap-3`}>
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm">
@@ -500,6 +528,12 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
             </button>
           )}
         </div>
+        {emptyState && plants.length === 0 && (
+          <p className="text-xs leading-5 text-slate-500 lg:col-span-3">
+            Není to heslo do Spottexu. Pokud si na něj nevzpomínáte, obnovte si
+            ho přímo v aplikaci své elektrárny a pak se sem vraťte.
+          </p>
+        )}
         {statusMessage && <p className={`text-sm text-brand-700 ${emptyState ? "lg:col-span-3" : "sm:col-span-2"}`} role="status">{statusMessage}</p>}
         {failure && (
           <div

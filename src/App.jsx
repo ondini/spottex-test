@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MiniConsultationCalendar from './components/marketing/MiniConsultationCalendar'
 
 const LOGO_URL = 'https://framerusercontent.com/images/umHNWFzfNiwMjUFM1F5u3PfOa4U.png'
@@ -153,8 +153,36 @@ function HeadingRow({ children, center }) {
   )
 }
 
+const accountMenuItems = [
+  { href: '/registrace', label: 'Registrovat se' },
+  { href: '/prihlaseni', label: 'Přihlásit se' },
+  { href: '/app/dashboard', label: 'Otevřít aplikaci' },
+]
+
 export function Nav({ isAuthenticated = false }) {
   const accountCta = useAccountCta(isAuthenticated)
+  // The suggested action stays one click away, but every account action has to
+  // remain reachable: someone signed in still needs to create an account for
+  // another person.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    function onPointerDown(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false)
+    }
+    function onKeyDown(event) {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
   return (
     <nav className="nav">
       <a href="/" className="nav-logo">
@@ -165,9 +193,38 @@ export function Nav({ isAuthenticated = false }) {
         <a href="/konzultace">Konzultace</a>
         <a href="/blog">Blog</a>
       </div>
-      <a href={accountCta.href} className="nav-cta">
-        {accountCta.label}
-      </a>
+      <div className="nav-account" ref={menuRef}>
+        <a href={accountCta.href} className="nav-cta nav-cta-split">
+          {accountCta.label}
+        </a>
+        <button
+          type="button"
+          className="nav-cta-toggle"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Další možnosti účtu"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        {menuOpen && (
+          <div className="nav-account-menu" role="menu">
+            {accountMenuItems.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                role="menuitem"
+                className="nav-account-menu-item"
+                onClick={() => setMenuOpen(false)}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
     </nav>
   )
 }
