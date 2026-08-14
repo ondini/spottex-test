@@ -211,6 +211,8 @@ Production legacy energy traffic must use HTTPS, normally through an internal TL
 
 `.env.example` documents local defaults. `deploy/env.production.example` is the complete production template and should be copied to repository-root `.env.production`. Never commit `.env`, `.env.local`, or `.env.production`.
 
+Define each secret in exactly one environment file. Development Compose is normally started with two `--env-file` flags, and the later one wins, so a value present in both files silently depends on flag order and on when each container was last recreated. `APP_ENCRYPTION_KEY` sat in both with different values: containers recreated at different times encrypted and decrypted with different keys, and an uploaded invoice failed with `Unsupported state or unable to authenticate data` because the service that wrote it and the service that read it disagreed. The same hazard reaches energy tokens, e-mail bodies, and calendar credentials. It lives in `Secrets/spottex.development.env` only; `.env` carries a comment where it used to be.
+
 Production essentials:
 
 - `APP_URL`, `AUTH_URL`
