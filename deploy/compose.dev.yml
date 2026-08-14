@@ -116,20 +116,24 @@ services:
       dockerfile: Dockerfile
       target: invoice-parser
     restart: unless-stopped
+    # Runs as the account that owns the Codex credential, so it can read the
+    # seed; CODEX_HOME is a persistent volume so a refreshed token survives a
+    # restart instead of being lost to the read-only root filesystem.
+    user: "1001:1001"
     environment:
-      CODEX_HOME: /home/node/.codex
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       INVOICE_PARSER_PORT: "3010"
       INVOICE_CODEX_TIMEOUT_MS: "480000"
       INVOICE_MAX_DOCUMENT_BYTES: "10485760"
     volumes:
-      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in Secrets/spottex.development.env}:/home/node/.codex/auth.json:ro
+      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in Secrets/spottex.development.env}:/run/codex-seed/auth.json:ro
+      - spottex_dev_parser_codex:/data/codex
     read_only: true
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:size=32m,uid=1000,gid=1000,mode=0700
+      - /tmp:size=32m,uid=1001,gid=1001,mode=0700
     mem_limit: 1g
     cpus: 1
 
@@ -183,6 +187,9 @@ volumes:
   spottex_dev_db:
   spottex_dev_node_modules:
   spottex_dev_analysis_node_modules:
+  # The parser's own Codex session. Keeping it out of the image and off the
+  # read-only root is what lets a refreshed token outlive a restart.
+  spottex_dev_parser_codex:
 
 networks:
   costs_data:
