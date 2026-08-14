@@ -666,6 +666,10 @@ export function selectLegacyRegistrationRows(
       "LEGACY_UNAVAILABLE",
       "Energetická služba nevrátila všechny vybrané elektrárny.",
       502,
+      {
+        stage: "register_selected",
+        upstreamMessage: `Vybráno ${selectedSiteIds.length}, vráceno ${rows.length}.`,
+      },
     );
   }
   return rows;
@@ -673,12 +677,20 @@ export function selectLegacyRegistrationRows(
 
 export async function connectLegacyEnergyAccount(
   userId: number,
-  selection: { plantIds: string[]; discoveryId: string },
+  selection: {
+    plantIds: string[];
+    discoveryId: string;
+    // The backend verifies these against the fingerprint stored during
+    // discovery, so the plant selection alone cannot register anything.
+    email: string;
+    password: string;
+  },
 ): Promise<{ sites: EnergySiteSummary[]; connectedSiteIds: number[] }> {
   const client = new LegacySpottexClient();
   const registration = await client.registerPlants(
     selection.plantIds,
     selection.discoveryId,
+    { email: selection.email, password: selection.password },
   );
   const selectedSiteIds = new Set(registration.selectedSiteIds);
   const login = {
@@ -737,6 +749,10 @@ export async function connectLegacyEnergyAccount(
       "CONFLICT",
       "Některá elektrárna už je bezpečně přiřazena k jinému Spottex účtu.",
       409,
+      {
+        stage: "ownership_check",
+        upstreamMessage: `Kolidujících elektráren ${foreignSites.length}, střídačů ${foreignInverters.length}.`,
+      },
     );
   }
 

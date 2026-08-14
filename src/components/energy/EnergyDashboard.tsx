@@ -46,6 +46,9 @@ import { trackEvent } from "@/lib/client-analytics";
 type ApiError = {
   error?: string;
   code?: string;
+  reference?: string;
+  detail?: { stage?: string; upstreamStatus?: number; upstreamMessage?: string };
+  requiresCredentials?: boolean;
   connectorConfigured?: boolean;
   message?: string;
   requiresSelection?: boolean;
@@ -54,6 +57,16 @@ type ApiError = {
   plants?: LegacyPlantCandidate[];
   queuedHistoryImports?: number;
   connectedSiteIds?: number[];
+};
+
+/** What the connect form shows when a step fails, beyond the plain message. */
+type ConnectFailure = {
+  message: string;
+  code?: string;
+  reference?: string;
+  stage?: string;
+  upstreamStatus?: number;
+  upstreamMessage?: string;
 };
 
 type ConnectedEnergyAccount = {
@@ -98,7 +111,7 @@ function formatCompleteDays(value: number): string {
 function ConnectLegacyAccount({ compact = false, configured = true, emptyState = false, onConnected }: { compact?: boolean; configured?: boolean; emptyState?: boolean; onConnected: (result: ConnectedEnergyAccount) => void }) {
   const [open, setOpen] = useState(!compact);
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [plants, setPlants] = useState<LegacyPlantCandidate[]>([]);
   const [selectedPlantIds, setSelectedPlantIds] = useState<string[]>([]);
@@ -106,6 +119,11 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
   const [accountEmail, setAccountEmail] = useState<string>("");
   const [selectionExpiresAt, setSelectionExpiresAt] = useState<number | null>(null);
   const [phase, setPhase] = useState<"idle" | "discovering" | "selecting" | "connecting" | "history">("idle");
+  // The registration step re-verifies the SolaX credentials, so they are kept
+  // in memory for the second request only. They are never cached in
+  // sessionStorage, which is why a restored selection has to ask again.
+  const [password, setPassword] = useState<string>("");
+  const [passwordNeeded, setPasswordNeeded] = useState(false);
 
   useEffect(() => {
     try {
@@ -128,6 +146,7 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
       setAccountEmail(cached.accountEmail);
       setSelectionExpiresAt(cached.expiresAt);
       setPhase("selecting");
+      setPasswordNeeded(true);
       setStatusMessage(`Pokračujte výběrem jedné nebo více z ${cached.plants.length} nalezených elektráren.`);
     } catch {
       clearCachedSelection();
@@ -153,38 +172,67 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
-    setSubmitting(true);
-    setMessage(null);
-    setStatusMessage(null);
-    setPhase(plants.length ? "connecting" : "discovering");
     const form = new FormData(formElement);
+    const selecting = plants.length > 0;
+    // Discovery reads both fields from the form; registration reuses the
+    // verified account and takes the password from state, or from the field
+    // shown again after a page reload dropped it.
+    const email = selecting ? accountEmail : String(form.get("email") || "");
+    const submittedPassword = String(form.get("password") || "");
+    const effectivePassword = selecting
+      ? passwordNeeded
+        ? submittedPassword
+        : password
+      : submittedPassword;
+
+    if (selecting && !effectivePassword) {
+      setPasswordNeeded(true);
+      setFailure({
+        message: "Pro dokončení připojení zadejte znovu heslo k účtu SolaX Cloud.",
+      });
+      setPhase("selecting");
+      return;
+    }
+
+    setSubmitting(true);
+    setFailure(null);
+    setStatusMessage(null);
+    setPhase(selecting ? "connecting" : "discovering");
     try {
-      const selecting = plants.length > 0;
-      const email = selecting ? null : String(form.get("email") || "");
       const response = await fetch("/api/app/energy/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(!selecting ? { email, password: form.get("password") } : {}),
-          ...(selecting
-            ? {
-                plantIds: selectedPlantIds,
-                discoveryId,
-              }
-            : {}),
+          email,
+          password: effectivePassword,
+          ...(selecting ? { plantIds: selectedPlantIds, discoveryId } : {}),
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as ApiError;
-      if (!response.ok) throw new Error(payload.error || "Účet se nepodařilo připojit.");
+      if (!response.ok) {
+        if (payload.requiresCredentials) setPasswordNeeded(true);
+        setFailure({
+          message: payload.error || `Účet se nepodařilo připojit (HTTP ${response.status}).`,
+          code: payload.code,
+          reference: payload.reference,
+          stage: payload.detail?.stage,
+          upstreamStatus: payload.detail?.upstreamStatus,
+          upstreamMessage: payload.detail?.upstreamMessage,
+        });
+        setPhase(selecting ? "selecting" : "idle");
+        return;
+      }
       if (payload.requiresSelection && payload.plants?.length && payload.discoveryId) {
         const expiresAt = Date.now() + (payload.expiresInSeconds ?? 3600) * 1000;
         setPlants(payload.plants);
         setSelectedPlantIds([]);
         setDiscoveryId(payload.discoveryId);
-        setAccountEmail(email || "");
+        setAccountEmail(email);
+        setPassword(effectivePassword);
+        setPasswordNeeded(false);
         setSelectionExpiresAt(expiresAt);
         cacheSelection({
-          accountEmail: email || "",
+          accountEmail: email,
           discoveryId: payload.discoveryId,
           expiresAt,
           plants: payload.plants,
@@ -210,6 +258,8 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
       setSelectedPlantIds([]);
       setDiscoveryId("");
       setAccountEmail("");
+      setPassword("");
+      setPasswordNeeded(false);
       setSelectionExpiresAt(null);
       clearCachedSelection();
       setOpen(false);
@@ -218,8 +268,14 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
         queuedHistoryImports: payload.queuedHistoryImports ?? 0,
       });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Účet se nepodařilo připojit.");
-      setPhase(plants.length ? "selecting" : "idle");
+      setFailure({
+        message:
+          error instanceof Error
+            ? `Požadavek na server se nepodařilo dokončit: ${error.message}`
+            : "Účet se nepodařilo připojit.",
+        stage: selecting ? "register_selected" : "discover_plants",
+      });
+      setPhase(selecting ? "selecting" : "idle");
     } finally {
       setSubmitting(false);
     }
@@ -230,9 +286,11 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
     setSelectedPlantIds([]);
     setDiscoveryId("");
     setAccountEmail("");
+    setPassword("");
+    setPasswordNeeded(false);
     setSelectionExpiresAt(null);
     clearCachedSelection();
-    setMessage(null);
+    setFailure(null);
     setStatusMessage(null);
     setPhase("idle");
   }
@@ -271,11 +329,24 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
             <span className={emptyState ? "sr-only" : undefined}>Heslo do SolaX Cloud</span>
             <input className={`app-input ${emptyState ? "lg:h-full" : "mt-1.5"}`} type="password" name="password" autoComplete="current-password" placeholder={emptyState ? "Heslo do SolaX Cloud" : undefined} required disabled={!configured} />
           </label>
-        </> : <div className={`${emptyState ? "lg:col-span-3" : "sm:col-span-2"} flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm`}>
-          <span className="text-slate-600">Účet <strong className="text-slate-900">{accountEmail}</strong> je bezpečně ověřený.</span>
-          <span className="text-xs text-slate-500">
-            Výběr je uložený do {selectionExpiresAt ? new Intl.DateTimeFormat("cs-CZ", { hour: "2-digit", minute: "2-digit" }).format(selectionExpiresAt) : "60 minut"}.
-          </span>
+        </> : <div className={`${emptyState ? "lg:col-span-3" : "sm:col-span-2"} grid gap-3`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm">
+            <span className="text-slate-600">Účet <strong className="text-slate-900">{accountEmail}</strong> je bezpečně ověřený.</span>
+            <span className="text-xs text-slate-500">
+              Výběr je uložený do {selectionExpiresAt ? new Intl.DateTimeFormat("cs-CZ", { hour: "2-digit", minute: "2-digit" }).format(selectionExpiresAt) : "60 minut"}.
+            </span>
+          </div>
+          {/* The password is never cached, so a reloaded selection has to ask
+              for it again before the registration step can run. */}
+          {passwordNeeded && (
+            <label className="text-sm font-medium text-slate-700">
+              Heslo do SolaX Cloud
+              <input className="app-input mt-1.5" type="password" name="password" autoComplete="current-password" required disabled={!configured} />
+              <span className="mt-1.5 block text-xs font-normal text-slate-500">
+                Připojení elektrárny potvrzuje účet ještě jednou, proto heslo zadejte prosím znovu.
+              </span>
+            </label>
+          )}
         </div>}
         {plants.length > 0 && (
           <fieldset className={`grid gap-3 ${emptyState ? "lg:col-span-3" : "sm:col-span-2"}`}>
@@ -430,7 +501,53 @@ function ConnectLegacyAccount({ compact = false, configured = true, emptyState =
           )}
         </div>
         {statusMessage && <p className={`text-sm text-brand-700 ${emptyState ? "lg:col-span-3" : "sm:col-span-2"}`} role="status">{statusMessage}</p>}
-        {message && <p className={`text-sm text-error-600 ${emptyState ? "lg:col-span-3" : "sm:col-span-2"}`} role="alert">{message}</p>}
+        {failure && (
+          <div
+            className={`rounded-2xl border border-error-200 bg-error-50 p-4 ${emptyState ? "lg:col-span-3" : "sm:col-span-2"}`}
+            role="alert"
+          >
+            <p className="text-sm font-semibold leading-6 text-error-600">{failure.message}</p>
+            {(failure.code || failure.reference || failure.stage || failure.upstreamStatus || failure.upstreamMessage) && (
+              <>
+                <p className="mt-2 text-xs leading-5 text-slate-600">
+                  Technické podrobnosti pro správce – zkopírujte je prosím do hlášení:
+                </p>
+                <dl className="mt-1.5 grid gap-x-3 gap-y-1 text-xs leading-5 text-slate-700 sm:grid-cols-[auto_minmax(0,1fr)]">
+                  {failure.reference && (
+                    <>
+                      <dt className="text-slate-500">Kód chyby</dt>
+                      <dd className="font-mono font-semibold text-slate-900">{failure.reference}</dd>
+                    </>
+                  )}
+                  {failure.stage && (
+                    <>
+                      <dt className="text-slate-500">Krok</dt>
+                      <dd className="font-mono">{failure.stage}</dd>
+                    </>
+                  )}
+                  {failure.code && (
+                    <>
+                      <dt className="text-slate-500">Typ</dt>
+                      <dd className="font-mono">{failure.code}</dd>
+                    </>
+                  )}
+                  {failure.upstreamStatus != null && (
+                    <>
+                      <dt className="text-slate-500">Odpověď služby</dt>
+                      <dd className="font-mono">HTTP {failure.upstreamStatus}</dd>
+                    </>
+                  )}
+                  {failure.upstreamMessage && (
+                    <>
+                      <dt className="text-slate-500">Hlášení služby</dt>
+                      <dd className="font-mono break-words">{failure.upstreamMessage}</dd>
+                    </>
+                  )}
+                </dl>
+              </>
+            )}
+          </div>
+        )}
       </form>
     </section>
   );

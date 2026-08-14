@@ -200,11 +200,27 @@ export type EnergyApiErrorCode =
   | "CONFLICT"
   | "INVALID_REQUEST";
 
+/**
+ * Non-sensitive technical context for a failed energy operation. It exists so
+ * an operator can tell "the plant list expired" apart from "the backend
+ * rejected our request shape" without reading server logs. Never put
+ * credentials, tokens, or full request bodies in here.
+ */
+export type EnergyErrorDetail = {
+  /** Which step of the flow failed, e.g. "discover_plants". */
+  stage: string;
+  /** Upstream HTTP status, when the failure came from an external service. */
+  upstreamStatus?: number;
+  /** Sanitized upstream message, when the external service returned one. */
+  upstreamMessage?: string;
+};
+
 export class EnergyError extends Error {
   constructor(
     public readonly code: EnergyApiErrorCode,
     message: string,
     public readonly status = 400,
+    public readonly detail?: EnergyErrorDetail,
   ) {
     super(message);
     this.name = "EnergyError";

@@ -126,11 +126,17 @@ describe("LegacySpottexClient transport contract", () => {
       const url = new URL(String(input));
       expect(url.pathname).toBe("/register_selected");
       const body = JSON.parse(String(init?.body)) as {
+        email: string;
+        password: string;
         plant_ids: string;
         discovery_id: string;
       };
-      expect(body).not.toHaveProperty("email");
-      expect(body).not.toHaveProperty("password");
+      // The backend re-verifies the credentials against the fingerprint stored
+      // during discovery, so they must travel with the selection — encrypted,
+      // never in the clear.
+      expect(body.email).not.toBe("plant@example.test");
+      expect(decrypt(body.email)).toBe("plant@example.test");
+      expect(decrypt(body.password)).toBe("plant-password");
       expect(JSON.parse(decrypt(body.plant_ids))).toEqual(["plant-20"]);
       expect(decrypt(body.discovery_id)).toBe("discovery-token-1234567890");
       return encryptedResponse({
@@ -159,10 +165,96 @@ describe("LegacySpottexClient transport contract", () => {
       client.registerPlants(
         ["plant-20"],
         "discovery-token-1234567890",
+        { email: "plant@example.test", password: "plant-password" },
       ),
     ).resolves.toMatchObject({
       selectedSiteIds: ["77"],
       plants: [{ siteId: "77", deviceId: "88", optimizationOn: false }],
+    });
+  });
+
+  it("accepts a registration response that carries no explicit account id", async () => {
+    // The backend identifies the account by the login it issued the tokens
+    // for and sends no external_account_id at all. Requiring one discarded a
+    // registration the backend had already committed.
+    vi.stubGlobal("fetch", vi.fn(async () => encryptedResponse({
+      access_token: "new-access-token",
+      refresh_token: "new-refresh-token",
+      selected_supply_point_ids: [77],
+      plants: [
+        {
+          id: 77,
+          device_id: 88,
+          name: "Výrobní hala",
+          optimization_running: false,
+          required_info: false,
+        },
+      ],
+    })));
+
+    const client = new LegacySpottexClient({
+      baseUrl: "https://energy.example.test",
+      fernetKey: FERNET_KEY,
+    });
+
+    await expect(
+      client.registerPlants(["plant-20"], "discovery-token-1234567890", {
+        email: "plant@example.test",
+        password: "plant-password",
+      }),
+    ).resolves.toMatchObject({
+      externalAccountId: "plant@example.test",
+      selectedSiteIds: ["77"],
+    });
+  });
+
+  it("keeps the reason a registration was rejected instead of a generic retry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      { error: "Missing encrypted credentials" },
+      { status: 400 },
+    )));
+
+    const client = new LegacySpottexClient({
+      baseUrl: "https://energy.example.test",
+      fernetKey: FERNET_KEY,
+    });
+
+    await expect(
+      client.registerPlants(["plant-20"], "discovery-token-1234567890", {
+        email: "plant@example.test",
+        password: "plant-password",
+      }),
+    ).rejects.toMatchObject({
+      code: "LEGACY_UNAVAILABLE",
+      status: 502,
+      detail: {
+        stage: "register_selected",
+        upstreamStatus: 400,
+        upstreamMessage: "Missing encrypted credentials",
+      },
+    });
+  });
+
+  it("explains a plant SolaX offered but cannot register", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      { error: "Selected plants have no inverter" },
+      { status: 422 },
+    )));
+
+    const client = new LegacySpottexClient({
+      baseUrl: "https://energy.example.test",
+      fernetKey: FERNET_KEY,
+    });
+
+    await expect(
+      client.registerPlants(["plant-20"], "discovery-token-1234567890", {
+        email: "plant@example.test",
+        password: "plant-password",
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 422,
+      detail: { stage: "register_selected", upstreamStatus: 422 },
     });
   });
 

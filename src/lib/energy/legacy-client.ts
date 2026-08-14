@@ -31,6 +31,29 @@ function requiredString(value: unknown): string {
   return value;
 }
 
+/** The external account id, for the responses that carry one at all. */
+function optionalAccountId(payload: JsonObject): string | null {
+  const raw = payload.external_account_id ?? payload.user_id ?? payload.account_id;
+  return typeof raw === "string" || typeof raw === "number" ? String(raw) : null;
+}
+
+/**
+ * Keeps a detail-less parsing failure attributable to the step it happened in,
+ * so it reaches the operator as something more useful than a bare 502.
+ */
+function withStage(error: unknown, stage: string): EnergyError {
+  if (error instanceof EnergyError) {
+    if (error.detail) return error;
+    return new EnergyError(error.code, error.message, error.status, { stage });
+  }
+  return new EnergyError(
+    "LEGACY_UNAVAILABLE",
+    "Odpověď energetické služby nelze zpracovat.",
+    502,
+    { stage },
+  );
+}
+
 export function accessTokenExpiresAt(token: string): Date | null {
   try {
     const [, payload] = token.split(".");
@@ -97,17 +120,28 @@ export class LegacySpottexClient {
         timeoutMs: 120_000,
       });
     } catch (error) {
+      const detail = {
+        stage: "discover_plants",
+        ...(error instanceof LegacyHttpError
+          ? {
+              upstreamStatus: error.status,
+              ...(error.upstreamMessage ? { upstreamMessage: error.upstreamMessage } : {}),
+            }
+          : {}),
+      };
       if (error instanceof LegacyHttpError && error.status === 401) {
         throw new EnergyError(
           "INVALID_REQUEST",
           "E-mail nebo heslo k SolaX Cloud není správné.",
           401,
+          detail,
         );
       }
       throw new EnergyError(
         "LEGACY_UNAVAILABLE",
-        "Účet SolaX Cloud se nepodařilo ověřit. Zkuste to prosím znovu.",
+        "Účet SolaX Cloud se nepodařilo ověřit. Přihlášení do portálu SolaX nebo načtení jeho API neproběhlo podle očekávání.",
         502,
+        detail,
       );
     }
 
@@ -169,15 +203,24 @@ export class LegacySpottexClient {
     return { discoveryId, expiresInSeconds, plants };
   }
 
+  /**
+   * Second onboarding step. The backend re-verifies the SolaX credentials
+   * against the fingerprint it stored during `discover_plants`, so a discovery
+   * handle on its own is deliberately not enough to register a plant — the
+   * credentials must be supplied again here.
+   */
   async registerPlants(
     plantIds: string[],
     discoveryId: string,
+    credentials: { email: string; password: string },
   ): Promise<LegacyLoginResult & { selectedSiteIds: string[] }> {
     let response: unknown;
     try {
       response = await this.requestEncrypted("register_selected", {
         method: "POST",
         body: JSON.stringify({
+          email: this.encryptString(credentials.email),
+          password: this.encryptString(credentials.password),
           plant_ids: this.encryptString(JSON.stringify(plantIds)),
           discovery_id: this.encryptString(discoveryId),
         }),
@@ -185,75 +228,59 @@ export class LegacySpottexClient {
         timeoutMs: 300_000,
       });
     } catch (error) {
-      if (error instanceof LegacyHttpError && error.status === 409) {
-        throw new EnergyError(
-          "CONFLICT",
-          "Vybraná elektrárna už je přiřazená k jinému účtu Spottex.",
-          409,
-        );
-      }
-      if (error instanceof LegacyHttpError && error.status === 404) {
-        throw new EnergyError(
-          "INVALID_REQUEST",
-          "Vybraná elektrárna už v účtu SolaX Cloud není dostupná.",
-          404,
-        );
-      }
-      if (error instanceof LegacyHttpError && error.status === 410) {
-        throw new EnergyError(
-          "INVALID_REQUEST",
-          "Výběr elektrárny vypršel. Načtěte seznam ze SolaX Cloud znovu.",
-          410,
-        );
-      }
-      if (error instanceof LegacyHttpError && error.status === 423) {
-        throw new EnergyError(
-          "CONFLICT",
-          "Připojení této elektrárny už probíhá. Neodesílejte formulář znovu.",
-          423,
-        );
-      }
-      throw new EnergyError(
-        "LEGACY_UNAVAILABLE",
-        "Vybranou elektrárnu se nepodařilo připojit. Zkuste to prosím znovu.",
-        502,
-      );
+      throw registrationError(error);
     }
 
-    const payload = asObject(response);
-    const accessToken = requiredString(payload.access_token);
-    const refreshToken = requiredString(payload.refresh_token);
-    const rawSelectedSiteIds = Array.isArray(payload.selected_supply_point_ids)
-      ? payload.selected_supply_point_ids
-      : [payload.selected_supply_point_id];
-    const selectedSiteIds = rawSelectedSiteIds
-      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
-      .map(String);
-    if (selectedSiteIds.length !== plantIds.length) {
-      throw new EnergyError(
-        "LEGACY_UNAVAILABLE",
-        "Energetická služba nepotvrdila všechny vybrané elektrárny.",
-        502,
-      );
+    // Registration is already committed upstream at this point, so a parsing
+    // failure here leaves the plant registered in the backend but absent from
+    // Spottex. Every branch therefore names its stage.
+    try {
+      const payload = asObject(response);
+      const accessToken = requiredString(payload.access_token);
+      const refreshToken = requiredString(payload.refresh_token);
+      const rawSelectedSiteIds = Array.isArray(payload.selected_supply_point_ids)
+        ? payload.selected_supply_point_ids
+        : [payload.selected_supply_point_id];
+      const selectedSiteIds = rawSelectedSiteIds
+        .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+        .map(String);
+      if (selectedSiteIds.length !== plantIds.length) {
+        throw new EnergyError(
+          "LEGACY_UNAVAILABLE",
+          "Energetická služba nepotvrdila všechny vybrané elektrárny.",
+          502,
+          {
+            stage: "register_selected_response",
+            upstreamMessage: `Vybráno ${plantIds.length}, potvrzeno ${selectedSiteIds.length}.`,
+          },
+        );
+      }
+      this.tokens = { accessToken, refreshToken };
+      const plants = (Array.isArray(payload.plants) ? payload.plants : [])
+        .map(mapLegacyPlant)
+        .filter((plant): plant is NonNullable<typeof plant> => plant !== null);
+      return {
+        accessToken,
+        refreshToken,
+        // Registration identifies the account by the login it was performed
+        // with — that is the identity the backend puts into the tokens it
+        // just issued. Only /login carries an explicit id, so accept one when
+        // present and otherwise keep the same value /login would have stored.
+        externalAccountId: optionalAccountId(payload) ?? credentials.email,
+        plants,
+        selectedSiteIds,
+      };
+    } catch (error) {
+      throw withStage(error, "register_selected_response");
     }
-    this.tokens = { accessToken, refreshToken };
-    const plants = (Array.isArray(payload.plants) ? payload.plants : [])
-      .map(mapLegacyPlant)
-      .filter((plant): plant is NonNullable<typeof plant> => plant !== null);
-    return {
-      accessToken,
-      refreshToken,
-      externalAccountId: requiredString(payload.external_account_id),
-      plants,
-      selectedSiteIds,
-    };
   }
 
   async registerSelected(
     plantId: string,
     discoveryId: string,
+    credentials: { email: string; password: string },
   ): Promise<LegacyLoginResult & { selectedSiteId: string }> {
-    const result = await this.registerPlants([plantId], discoveryId);
+    const result = await this.registerPlants([plantId], discoveryId, credentials);
     return { ...result, selectedSiteId: result.selectedSiteIds[0] };
   }
 
@@ -290,14 +317,10 @@ export class LegacySpottexClient {
       .map(mapLegacyPlant)
       .filter((plant): plant is NonNullable<typeof plant> => plant !== null);
 
-    const rawAccountId = payload.user_id ?? payload.account_id;
     return {
       accessToken,
       refreshToken,
-      externalAccountId:
-        typeof rawAccountId === "string" || typeof rawAccountId === "number"
-          ? String(rawAccountId)
-          : null,
+      externalAccountId: optionalAccountId(payload),
       plants,
     };
   }
@@ -575,7 +598,7 @@ export class LegacySpottexClient {
     init: { method: string; headers?: Record<string, string>; body?: string; timeoutMs?: number },
   ): Promise<unknown> {
     const response = await this.requestRaw(endpoint, init);
-    if (!response.ok) throw new LegacyHttpError(response.status);
+    if (!response.ok) throw new LegacyHttpError(response.status, await readErrorMessage(response));
 
     let envelope: JsonObject;
     try {
@@ -634,8 +657,117 @@ export class LegacySpottexClient {
   }
 }
 
+/**
+ * The backend answers its own validation failures with a small JSON body such as
+ * `{"error": "Missing encrypted credentials"}` and logs nothing. Carrying that
+ * text along is the only way a rejected request stays diagnosable.
+ */
+async function readErrorMessage(response: Response): Promise<string | undefined> {
+  try {
+    const text = (await response.text()).slice(0, 1000);
+    if (!text) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const message = (parsed as JsonObject).error ?? (parsed as JsonObject).message;
+        if (typeof message === "string" && message.trim()) return message.trim();
+      }
+    } catch {
+      // A non-JSON body (proxy error page) is still worth reporting verbatim.
+    }
+    return text.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every status the registration endpoint can answer with maps to its own cause.
+ * Collapsing the unrecognized ones into a single "try again" message hides
+ * exactly the failures an operator has to act on, so each one keeps its own
+ * message plus the upstream status and text.
+ */
+function registrationError(error: unknown): EnergyError {
+  const stage = "register_selected";
+  if (!(error instanceof LegacyHttpError)) {
+    // A transport failure or an unverifiable response already carries its own
+    // message; only the stage is missing.
+    if (error instanceof EnergyError) {
+      return new EnergyError(error.code, error.message, error.status, error.detail ?? { stage });
+    }
+    return new EnergyError(
+      "LEGACY_UNAVAILABLE",
+      "Vybranou elektrárnu se nepodařilo připojit. Zkuste to prosím znovu.",
+      502,
+      { stage },
+    );
+  }
+
+  const detail = {
+    stage,
+    upstreamStatus: error.status,
+    ...(error.upstreamMessage ? { upstreamMessage: error.upstreamMessage } : {}),
+  };
+  switch (error.status) {
+    case 409:
+      return new EnergyError(
+        "CONFLICT",
+        "Vybraná elektrárna už je přiřazená k jinému účtu Spottex.",
+        409,
+        detail,
+      );
+    case 404:
+      return new EnergyError(
+        "INVALID_REQUEST",
+        "Vybraná elektrárna už v účtu SolaX Cloud není dostupná.",
+        404,
+        detail,
+      );
+    case 410:
+      return new EnergyError(
+        "INVALID_REQUEST",
+        "Výběr elektrárny vypršel nebo nepatří k zadanému účtu SolaX Cloud. Načtěte seznam elektráren znovu.",
+        410,
+        detail,
+      );
+    case 423:
+      return new EnergyError(
+        "CONFLICT",
+        "Připojení této elektrárny už probíhá. Neodesílejte formulář znovu.",
+        423,
+        detail,
+      );
+    case 422:
+      return new EnergyError(
+        "INVALID_REQUEST",
+        "Vybraná elektrárna nemá v účtu SolaX Cloud dostupný střídač se sériovým číslem, takže ji nelze připojit.",
+        422,
+        detail,
+      );
+    case 400:
+      // The backend rejected the request as malformed. That is a contract
+      // problem between the two services, not something the user can fix.
+      return new EnergyError(
+        "LEGACY_UNAVAILABLE",
+        "Energetická služba odmítla požadavek na připojení jako neplatný. Předejte prosím správci uvedený kód chyby.",
+        502,
+        detail,
+      );
+    default:
+      return new EnergyError(
+        "LEGACY_UNAVAILABLE",
+        "Vybranou elektrárnu se nepodařilo připojit. Zkuste to prosím znovu.",
+        502,
+        detail,
+      );
+  }
+}
+
 class LegacyHttpError extends EnergyError {
-  constructor(public readonly status: number) {
+  constructor(
+    public readonly status: number,
+    public readonly upstreamMessage?: string,
+  ) {
     super(
       "LEGACY_UNAVAILABLE",
       status === 401
