@@ -396,6 +396,7 @@ export async function getAnalysisWorkspace(
     publishedDistributionVersions,
     costsCatalog,
     preparationJobs,
+    runningHistoryImports,
   ] = await Promise.all([
     prisma.fundingProgramVersion.findMany({
       where: {
@@ -423,6 +424,24 @@ export async function getAnalysisWorkspace(
       take: Math.max(10, siteIds.length * 2),
       select: { payload: true },
     }),
+    // A site whose history is still arriving is not waiting on the user. The
+    // overview has to be able to say so instead of listing the gap as
+    // something they have to go and fix.
+    prisma.energyHistoryImport.findMany({
+      where: {
+        energySiteId: { in: siteIds.map((site) => site.id) },
+        status: { in: ["QUEUED", "RUNNING"] },
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        energySiteId: true,
+        status: true,
+        totalChunks: true,
+        succeededChunks: true,
+        failedChunks: true,
+        importedPoints: true,
+      },
+    }),
   ]);
   const preparingSiteIds = new Set(
     preparationJobs.flatMap((job) => {
@@ -431,6 +450,9 @@ export async function getAnalysisWorkspace(
         ? [parsed.data.request.siteId]
         : [];
     }),
+  );
+  const historyImportBySite = new Map(
+    runningHistoryImports.map((run) => [run.energySiteId, run] as const),
   );
   const standardCatalogReady = publishedProductVersions > 0 && publishedDistributionVersions > 0;
   return {
@@ -484,10 +506,21 @@ export async function getAnalysisWorkspace(
       const blockers = [
         ...(!dataQuality.readyForEstimate ? [dataQuality.message] : []),
       ];
+      const historyImport = historyImportBySite.get(site.id);
       return {
         id: site.id,
         name: site.name,
         preparing: preparingSiteIds.has(site.id),
+        historyImport: historyImport
+          ? {
+              totalChunks: historyImport.totalChunks,
+              doneChunks: Math.min(
+                historyImport.totalChunks,
+                historyImport.succeededChunks + historyImport.failedChunks,
+              ),
+              importedPoints: historyImport.importedPoints,
+            }
+          : null,
         dataQuality,
         ready: blockers.length === 0,
         blockers,

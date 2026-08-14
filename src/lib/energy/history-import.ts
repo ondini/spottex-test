@@ -34,6 +34,19 @@ const responseSchema = z.union([
   gridExportKwh: z.number().finite().nonnegative().optional(),
 }).strict()).max(2_000));
 
+/**
+ * Raised when the upstream has not prepared a range yet. It is a wait, not a
+ * fault, and it reads that way wherever the chunk's last error is surfaced.
+ */
+export class HistoryChunkEmptyError extends Error {
+  constructor(from: Date, to: Date) {
+    super(
+      `Cloud zatím nemá připravená data za období ${from.toISOString().slice(0, 10)} – ${to.toISOString().slice(0, 10)}. Zkusíme je načíst znovu.`,
+    );
+    this.name = "HistoryChunkEmptyError";
+  }
+}
+
 export function historyChunks(from: Date, to: Date, chunkMs = CHUNK_MS) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from || chunkMs <= 0) throw new Error("HISTORY_IMPORT_INVALID_WINDOW");
   const chunks: Array<{ from: Date; to: Date }> = [];
@@ -168,6 +181,16 @@ async function importChunk(chunkId: string) {
   const before = { accessToken: decryptSecret(connection.encryptedAccessToken), refreshToken: decryptSecret(connection.encryptedRefreshToken) };
   const client = new LegacySpottexClient({ tokens: before });
   const values = responseSchema.parse(await client.fetchHistoricalIntervals(run.inverter.externalDeviceId, chunk.chunkFrom, chunk.chunkTo));
+  // The backend downloads a freshly connected SolaX plant in resumable slices
+  // that can take hours, and answers ranges it has not reached yet with an
+  // empty list rather than an error. Accepting that as "no data" is what left
+  // eight months missing from a plant whose history the backend did hold, and
+  // it silently skewed every figure derived from the gap. An empty past range
+  // is therefore retried on the existing budget and only believed once the
+  // budget is spent.
+  if (values.length === 0 && chunk.attempts < chunk.maxAttempts) {
+    throw new HistoryChunkEmptyError(chunk.chunkFrom, chunk.chunkTo);
+  }
   for (const value of values) {
     const startAt = new Date(value.startAt);
     const endAt = new Date(value.endAt);

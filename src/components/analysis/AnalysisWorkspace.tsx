@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  CloudDownload,
   Download,
   FileUp,
   Info,
@@ -81,6 +82,11 @@ type Workspace = {
     id: number;
     name: string;
     preparing: boolean;
+    historyImport: {
+      totalChunks: number;
+      doneChunks: number;
+      importedPoints: number;
+    } | null;
     ready: boolean;
     blockers: string[];
     profileConfirmed: boolean;
@@ -415,6 +421,9 @@ export function AnalysisWorkspace({
   >(null);
   const autoStartAttempted = useRef(false);
   const inputRangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Entering with `?data=1` opens the input-data modal once per mount, never
+  // again after the user closes it.
+  const autoOpenedData = useRef(false);
   const inputSeriesCache = useRef(new Map<string, InputSeries>());
   const [proInput, setProInput] = useState({
     battery: "",
@@ -580,7 +589,12 @@ export function AnalysisWorkspace({
   }, [hasPending, refresh]);
 
   useEffect(() => {
-    if (!autoOpenData || !site || inputModalOpen) return;
+    if (!autoOpenData || !site || autoOpenedData.current) return;
+    // `autoOpenData` is a prop resolved on the server from `?data=1`, so
+    // stripping the query string below cannot clear it for this mount. Without
+    // the latch, closing the modal re-satisfies this effect and reopens it
+    // immediately, which makes the close button look broken.
+    autoOpenedData.current = true;
     void openInputData();
     // The query parameter is an entry action, not durable modal state.
     const url = new URL(window.location.href);
@@ -593,7 +607,7 @@ export function AnalysisWorkspace({
     // `openInputData` intentionally uses the current selected site once for
     // this URL entry action; recreating it is not a reason to reopen the modal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoOpenData, inputModalOpen, site?.id]);
+  }, [autoOpenData, site?.id]);
 
   async function start() {
     if (!site) return;
@@ -1281,14 +1295,72 @@ export function AnalysisWorkspace({
             </Link>
           ) : null}
         </div>
-        {!site.ready && (
+        {!site.ready && site.historyImport ? (
+          // Waiting on the cloud is not a task list. Name what is being
+          // downloaded, show how far it got, and say what happens on its own
+          // once it finishes.
+          <div className="mt-5 rounded-xl border border-brand-200 bg-brand-50 p-4">
+            <div className="flex items-center gap-2">
+              <CloudDownload className="size-5 shrink-0 text-brand-600" />
+              <p className="text-sm font-semibold text-slate-900">
+                Stahujeme historii výroby a spotřeby z cloudu
+              </p>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Načítáme naměřené hodnoty za poslední rok z cloudu výrobce vaší
+              elektrárny. Trvá to obvykle několik desítek minut a nemusíte u
+              toho zůstat — klidně zavřete okno.
+            </p>
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                <span>
+                  Načteno {site.historyImport.doneChunks} z{" "}
+                  {site.historyImport.totalChunks} období
+                </span>
+                <span>
+                  {Math.round(
+                    (site.historyImport.doneChunks /
+                      Math.max(1, site.historyImport.totalChunks)) *
+                      100,
+                  )}{" "}
+                  %
+                </span>
+              </div>
+              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all duration-700"
+                  style={{
+                    width: `${Math.max(
+                      3,
+                      Math.round(
+                        (site.historyImport.doneChunks /
+                          Math.max(1, site.historyImport.totalChunks)) *
+                          100,
+                      ),
+                    )}%`,
+                  }}
+                />
+              </div>
+              {site.historyImport.importedPoints > 0 && (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Zatím {number.format(site.historyImport.importedPoints)}{" "}
+                  naměřených záznamů.
+                </p>
+              )}
+            </div>
+            <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-sm leading-6 text-slate-700">
+              Jakmile budou data kompletní, <strong>analýza úspor se spustí
+              sama</strong> a výsledky vám pošleme e-mailem.
+            </p>
+          </div>
+        ) : !site.ready ? (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
             <p className="text-sm font-semibold text-amber-950">
-              Připravujeme podklady
+              K výpočtu ještě chybí tyto údaje
             </p>
             <p className="mt-1 text-sm leading-6 text-amber-900">
-              Nejdřív dokončete následující podklady. Jakmile budou připravené,
-              tlačítko se automaticky změní na „Spočítat základní úspory“.
+              Doplňte prosím následující. Jakmile to bude hotové, tlačítko se
+              samo změní na „Spočítat základní úspory“.
             </p>
             <ul className="mt-3 space-y-2 text-sm text-amber-900">
             {site.blockers.map((blocker) => (
@@ -1299,7 +1371,7 @@ export function AnalysisWorkspace({
             ))}
             </ul>
           </div>
-        )}
+        ) : null}
         {error && (
           <p
             role="alert"
