@@ -123,8 +123,17 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       INVOICE_PARSER_PORT: "3010"
+      # 0.0.0.0 is this container's namespace, not the host: a published port
+      # forwards to the container interface, so a loopback bind would make the
+      # publish below dead. The host side is narrowed by INVOICE_PARSER_PUBLISH
+      # -- loopback by default, the WireGuard address when another machine
+      # consumes this parser -- and the token is mandatory past loopback.
+      INVOICE_PARSER_BIND: "0.0.0.0"
+      INVOICE_PARSER_TOKEN: ${INVOICE_PARSER_TOKEN:?Set INVOICE_PARSER_TOKEN in Secrets/spottex.development.env}
       INVOICE_CODEX_TIMEOUT_MS: "480000"
       INVOICE_MAX_DOCUMENT_BYTES: "10485760"
+    ports:
+      - "${INVOICE_PARSER_PUBLISH:-127.0.0.1:3010}:3010"
     volumes:
       - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in Secrets/spottex.development.env}:/run/codex-seed/auth.json:ro
       - spottex_dev_parser_codex:/data/codex
@@ -148,7 +157,11 @@ services:
       DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}
       ENERGY_INVOICE_AI_ENABLED: "true"
+      # Loopback inside the namespace this container shares with the parser.
+      # The token is still required: once the parser has one configured it
+      # demands it from every caller, local ones included.
       INVOICE_PARSER_URL: http://127.0.0.1:3010
+      INVOICE_PARSER_TOKEN: ${INVOICE_PARSER_TOKEN:?Set INVOICE_PARSER_TOKEN in Secrets/spottex.development.env}
       INVOICE_AGENT_POLL_MS: "10000"
       INVOICE_AGENT_TIMEOUT_MS: "600000"
     depends_on:

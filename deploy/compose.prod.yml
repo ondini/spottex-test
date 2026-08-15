@@ -188,9 +188,11 @@ services:
       CODEX_HOME: /home/node/.codex
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       INVOICE_PARSER_PORT: "3010"
-      # Bind beyond loopback only together with a token; the server refuses to
-      # start otherwise.
-      INVOICE_PARSER_BIND: ${INVOICE_PARSER_BIND:-127.0.0.1}
+      # 0.0.0.0 is the container's own namespace, not the host: a published port
+      # forwards to the container's interface, so binding to loopback here would
+      # make the publish below dead. Exposure is limited by the publish address,
+      # and the server demands a token because this is past loopback.
+      INVOICE_PARSER_BIND: "0.0.0.0"
       INVOICE_PARSER_TOKEN: ${INVOICE_PARSER_TOKEN:-}
       INVOICE_CODEX_TIMEOUT_MS: ${INVOICE_CODEX_TIMEOUT_MS:-480000}
       INVOICE_MAX_DOCUMENT_BYTES: ${INVOICE_MAX_DOCUMENT_BYTES:-10485760}
