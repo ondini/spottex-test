@@ -58,17 +58,22 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      # Before the tests, not after: the integration specs create rows through
+      # Prisma, so an unmigrated database fails them on missing tables rather
+      # than on anything they are meant to check.
+      - name: Apply migrations
+        run: npm run db:deploy
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests
+      - name: Unit and integration tests
         run: npm test
-
-      - name: Apply migrations
-        run: npm run db:deploy
+        env:
+          RUN_DB_INTEGRATION_TESTS: "true"
 
       - name: Build
         run: npm run build:check
