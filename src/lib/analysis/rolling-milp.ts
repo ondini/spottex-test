@@ -9,7 +9,10 @@ import {
 import { createForecastRuntime, selectForecastPolicy, type ForecastSelection } from "./forecast";
 import { optimizeMilpHorizon } from "./milp";
 
-export const ROLLING_MILP_METHOD_VERSION = "ROLLING_4H_REPLAN_HOURLY_PLAN_15M_DISPATCH_VALIDATED_FORECAST_V8";
+// V9 plans in quarter hours rather than hours. The version is stamped onto every
+// run, so it has to move whenever the numbers do -- otherwise results produced
+// under the two resolutions are indistinguishable after the fact.
+export const ROLLING_MILP_METHOD_VERSION = "ROLLING_4H_REPLAN_15M_PLAN_15M_DISPATCH_VALIDATED_FORECAST_V9";
 
 function round(value: number, digits = 6) {
   const factor = 10 ** digits;

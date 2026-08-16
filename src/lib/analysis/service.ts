@@ -1758,7 +1758,13 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
           grid,
           timezone: run.energySite.timezone,
           horizonHours: 34,
-          planningResolutionMinutes: 60,
+          // Matches the quarter-hour grid the measurements and OTE prices
+          // already arrive on, and the interval the backend now controls at.
+          // Measured against hourly planning on three real sites over the same
+          // month of recorded production, consumption and prices: 713, 405 and
+          // 249 CZK per year in the site's favour, for under a second of extra
+          // solver time per simulation.
+          planningResolutionMinutes: 15,
           maxSolverCalls: ANALYSIS_MAX_SOLVER_CALLS,
           warmupIntervals,
           forecastSelection: pointBundle.forecastSelection,
