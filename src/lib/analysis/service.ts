@@ -58,6 +58,11 @@ export const ENERGY_ANALYSIS_PREPARE_JOB = "ENERGY_ANALYSIS_PREPARE_V1";
 export const ANALYSIS_ENGINE_VERSION = MILP_ENGINE_VERSION;
 export const ANALYSIS_METHODOLOGY_VERSION = `SELF_USE_VS_${ROLLING_MILP_METHOD_VERSION}`;
 export const ANALYSIS_PRODUCTION_READY = true;
+// One source for the planning grid. It is passed to the simulation, recorded in
+// the assumptions stored with every run, and reported by the timeout fallback;
+// when those were three literals they could disagree, and a run would claim an
+// hourly plan while the simulation had used quarter hours.
+const ANALYSIS_PLANNING_RESOLUTION_MINUTES = 15;
 const ANALYSIS_FORECAST_WARMUP_DAYS = 28;
 const ANALYSIS_SCENARIO_TIMEOUT_MS = Math.max(
   5_000,
@@ -1291,7 +1296,7 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
           smartMethod: ROLLING_MILP_METHOD_VERSION,
           horizonHours: 34,
           maximumSolverCallsPerScenario: ANALYSIS_MAX_SOLVER_CALLS,
-          planningResolutionMinutes: 60,
+          planningResolutionMinutes: ANALYSIS_PLANNING_RESOLUTION_MINUTES,
           forecastWarmupDays: ANALYSIS_FORECAST_WARMUP_DAYS,
           batteryCycleCostCzkKwh: DEFAULT_BATTERY_CYCLE_COST_CZK_KWH,
           productionCalibration: {
@@ -1764,7 +1769,7 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
           // month of recorded production, consumption and prices: 713, 405 and
           // 249 CZK per year in the site's favour, for under a second of extra
           // solver time per simulation.
-          planningResolutionMinutes: 15,
+          planningResolutionMinutes: ANALYSIS_PLANNING_RESOLUTION_MINUTES,
           maxSolverCalls: ANALYSIS_MAX_SOLVER_CALLS,
           warmupIntervals,
           forecastSelection: pointBundle.forecastSelection,
@@ -1786,7 +1791,7 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
             forecastMethod: `${ROLLING_MILP_METHOD_VERSION}:TIMEOUT_FALLBACK`,
             forecastQuality: pointBundle.forecastSelection,
             warmupIntervals,
-            planningResolutionMinutes: 60,
+            planningResolutionMinutes: ANALYSIS_PLANNING_RESOLUTION_MINUTES,
             replanHours: null,
           };
         }
