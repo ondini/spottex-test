@@ -1,0 +1,89 @@
+name: CD_JUB
+
+on:
+  push:
+    branches: ["prod"]
+  workflow_dispatch:
+
+# Deploys the Next.js platform to JUBELA as a Docker Compose stack.
+#
+# Replaces an earlier draft that rsynced `dist/` to /var/www/spottex_web/dist.
+# That predated the move to Next.js: the build produces a standalone server
+# under .next rather than a `dist` directory, and nginx serves dev.spottex.cz by
+# proxying to the container rather than from disk.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -euo pipefail
+            cd /opt/spottex-platform
+
+            echo "=== Pulling latest code ==="
+            git fetch origin prod
+            git checkout prod
+            git reset --hard origin/prod
+            # The hero video lives in Git LFS; a reset leaves pointer files.
+            git lfs pull
+
+            # .env.production is host-managed and deliberately not written here.
+            # It holds this machine's own secrets alongside the tokens shared
+            # with rserver, and regenerating it from workflow secrets would mean
+            # keeping two sources of truth for values that must not drift.
+            echo "=== Checking required environment ==="
+            missing=0
+            for key in APP_URL AUTH_SECRET APP_ENCRYPTION_KEY INTERNAL_JOB_TOKEN \
+                       DATABASE_URL DATABASE_ADMIN_URL EMAIL_FROM; do
+              if ! grep -qE "^${key}=.+" .env.production 2>/dev/null; then
+                echo "MISSING: ${key}"
+                missing=1
+              fi
+            done
+            if [ "$missing" -ne 0 ]; then
+              echo "Refusing to deploy: /opt/spottex-platform/.env.production is incomplete."
+              exit 1
+            fi
+
+            echo "=== Building and starting the stack ==="
+            docker compose --env-file .env.production -f deploy/compose.prod.yml \
+              up -d --build --remove-orphans
+
+            # Migrations run as a one-shot service with owner privileges. If they
+            # fail the app is left on the old schema, so surface it here.
+            echo "=== Checking migrations ==="
+            migrate_exit="$(docker inspect spottex-platform-migrate-1 --format '{{.State.ExitCode}}' 2>/dev/null || echo missing)"
+            if [ "$migrate_exit" != "0" ]; then
+              echo "Migrations did not complete (exit ${migrate_exit})"
+              docker compose --env-file .env.production -f deploy/compose.prod.yml logs --tail 40 migrate
+              exit 1
+            fi
+
+            echo "=== Waiting for health ==="
+            for attempt in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${SPOTTEX_PROD_PORT:-3005}/api/health" >/dev/null 2>&1; then
+                echo "healthy after ${attempt} attempt(s)"
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Application did not become healthy"
+                docker compose --env-file .env.production -f deploy/compose.prod.yml logs --tail 40 app
+                exit 1
+              fi
+              sleep 4
+            done
+
+            echo "=== Running services ==="
+            docker compose --env-file .env.production -f deploy/compose.prod.yml ps
+
+            echo "====== Deployment complete ======"

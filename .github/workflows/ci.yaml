@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["dev"]
+  push:
+    branches: ["prod"]
+  workflow_dispatch:
+
+# Mirrors what `npm run preflight` runs locally, minus the audit step, so a pull
+# request into dev fails here for the same reasons it would fail on a developer
+# machine.
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: spottex
+          POSTGRES_USER: spottex
+          POSTGRES_PASSWORD: spottex_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spottex -d spottex"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://spottex:spottex_ci@127.0.0.1:5432/spottex?schema=public
+      # Deterministic throwaway values. The unit suite never reaches a real
+      # provider, but the modules assert these are present and well-formed.
+      AUTH_SECRET: ci-only-auth-secret-not-used-outside-github-actions
+      APP_ENCRYPTION_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      INTERNAL_JOB_TOKEN: ci-only-internal-job-token
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # The hero video is stored in Git LFS. `next build` copies public/ as-is,
+        # so without this the build would ship a pointer file as the video.
+        with:
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply migrations
+        run: npm run db:deploy
+
+      - name: Build
+        run: npm run build:check
