@@ -12,8 +12,16 @@ on:
 # under .next rather than a `dist` directory, and nginx serves dev.spottex.cz by
 # proxying to the container rather than from disk.
 
+# The deploy is gated on the checks, not run beside them: a release that fails
+# its tests must not reach the machine. `verify` runs the same workflow a pull
+# request into dev runs, so the gate on the way out is the gate on the way in.
+
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yaml
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

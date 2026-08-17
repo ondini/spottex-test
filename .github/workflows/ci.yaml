@@ -3,13 +3,13 @@ name: CI
 on:
   pull_request:
     branches: ["dev"]
-  push:
-    branches: ["prod"]
   workflow_dispatch:
+  # Called by the deploy workflow so a release runs exactly the checks a pull
+  # request runs -- one definition, no chance of the gate drifting from the gate
+  # that was passed on the way in.
+  workflow_call:
 
-# Mirrors what `npm run preflight` runs locally, minus the audit step, so a pull
-# request into dev fails here for the same reasons it would fail on a developer
-# machine.
+# Mirrors `npm run preflight` minus the audit step.
 
 jobs:
   lint-test-build:
@@ -32,8 +32,8 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://spottex:spottex_ci@127.0.0.1:5432/spottex?schema=public
-      # Deterministic throwaway values. The unit suite never reaches a real
-      # provider, but the modules assert these are present and well-formed.
+      # Deterministic throwaway values. The suite never reaches a real provider,
+      # but the modules assert these are present and well-formed.
       AUTH_SECRET: ci-only-auth-secret-not-used-outside-github-actions
       APP_ENCRYPTION_KEY: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
       INTERNAL_JOB_TOKEN: ci-only-internal-job-token
