@@ -133,6 +133,14 @@ Veřejné přepnutí se provádí změnou upstreamu v samostatném reverse proxy
 v odpovídajícím dev/prod Compose projektu. Stav build režimu vrací `/api/health`
 v poli `runtime`.
 
+Produkční veřejné hostname vstupují přes remotely-managed Cloudflare Tunnel.
+Kontejner `cloudflared` běží s host networkingem, aby dosáhl na loopback-only
+port `127.0.0.1:3005`; do aplikační ani databázové sítě se nepřipojuje a server
+kvůli webu nepublikuje žádný další příchozí port. Host-managed
+`.env.production` musí obsahovat token konkrétního tunnelu v
+`CLOUDFLARE_TUNNEL_TOKEN`. Tento connector token není obecný Cloudflare API
+token a nesmí se commitovat.
+
 ## Nejrychlejší lokální start: Docker Compose
 
 Požadavky: Docker Engine a Docker Compose v2.

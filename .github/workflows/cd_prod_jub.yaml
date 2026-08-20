@@ -52,7 +52,8 @@ jobs:
             echo "=== Checking required environment ==="
             missing=0
             for key in APP_URL AUTH_SECRET APP_ENCRYPTION_KEY INTERNAL_JOB_TOKEN \
-                       DATABASE_URL DATABASE_ADMIN_URL EMAIL_FROM; do
+                       DATABASE_URL DATABASE_ADMIN_URL EMAIL_FROM \
+                       CLOUDFLARE_TUNNEL_TOKEN; do
               if ! grep -qE "^${key}=.+" .env.production 2>/dev/null; then
                 echo "MISSING: ${key}"
                 missing=1
