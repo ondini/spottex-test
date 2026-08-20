@@ -2,8 +2,50 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+function normalizedHostname(host: string | null) {
+  if (!host) return null;
+  try {
+    return new URL(`http://${host}`).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function httpsRedirect(request: NextRequest) {
+  const configuredOrigin = process.env.APP_URL || process.env.AUTH_URL;
+  if (!configuredOrigin) return null;
+
+  let publicHostname: string;
+  try {
+    const publicUrl = new URL(configuredOrigin);
+    if (publicUrl.protocol !== "https:") return null;
+    publicHostname = publicUrl.hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return null;
+  }
+
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim().toLowerCase();
+  const protocol = forwardedProtocol || request.nextUrl.protocol.replace(":", "").toLowerCase();
+  if (protocol !== "http") return null;
+
+  // Only redirect configured public hosts. Internal health checks legitimately
+  // use plain HTTP on the private Compose network and must stay reachable.
+  const requestHostname = normalizedHostname(request.headers.get("host") || request.nextUrl.host);
+  if (requestHostname !== publicHostname) return null;
+
+  // Assign the path separately: passing a `//host/path` pathname to the URL
+  // constructor would interpret it as a protocol-relative open redirect.
+  const destination = new URL(`https://${requestHostname}`);
+  destination.pathname = request.nextUrl.pathname;
+  destination.search = request.nextUrl.search;
+  return NextResponse.redirect(destination, 308);
+}
+
 function requestOrigin(request: NextRequest) {
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  // Host is authoritative for the request handled by Next.js. A browser can
+  // supply X-Forwarded-Host itself, so it must not override Host in the CSRF
+  // origin comparison.
+  const host = request.headers.get("host") || request.headers.get("x-forwarded-host");
   if (!host) return null;
   const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
   const protocol = forwardedProtocol || request.nextUrl.protocol.replace(":", "");
@@ -11,6 +53,10 @@ function requestOrigin(request: NextRequest) {
 }
 
 export function middleware(request: NextRequest) {
+  const redirect = httpsRedirect(request);
+  if (redirect) return redirect;
+  const isApi = request.nextUrl.pathname === "/api" || request.nextUrl.pathname.startsWith("/api/");
+  if (!isApi) return NextResponse.next();
   if (SAFE_METHODS.has(request.method)) return NextResponse.next();
   if (request.headers.get("sec-fetch-site") === "cross-site") {
     return NextResponse.json({ error: "CROSS_SITE_REQUEST_REJECTED" }, { status: 403 });
@@ -32,4 +78,4 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: "/api/:path*" };
+export const config = { matcher: "/:path*" };
