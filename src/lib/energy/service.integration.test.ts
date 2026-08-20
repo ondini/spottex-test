@@ -37,17 +37,19 @@ const originalAuthSecret = process.env.AUTH_SECRET;
 
 async function createFixture(entitled: boolean): Promise<Fixture> {
   const suffix = `energy-it-${randomUUID()}`;
-  const product = await prisma.product.upsert({
-    where: { code: "INVERTER_CONTROL" },
-    update: {},
-    create: {
+  await prisma.product.createMany({
+    data: [{
       code: "INVERTER_CONTROL",
       name: "Řízení střídače",
       type: ProductType.SUBSCRIPTION,
       priceMinor: 0,
       billingPeriodDays: 30,
       metadata: { integrationTestBootstrap: true },
-    },
+    }],
+    skipDuplicates: true,
+  });
+  const product = await prisma.product.findUniqueOrThrow({
+    where: { code: "INVERTER_CONTROL" },
   });
   const user = await prisma.user.create({
     data: {
