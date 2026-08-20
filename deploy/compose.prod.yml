@@ -256,9 +256,7 @@ services:
       - >-
         while true; do
           if test ! -f /tmp/.last-start; then date +%s > /tmp/.last-start; fi;
-          if curl -fsS --connect-timeout 5 --max-time 1800 -X POST
-          -H "Authorization: Bearer $${INTERNAL_JOB_TOKEN}"
-          http://app:3004/api/internal/jobs/run; then
+          if curl -fsS --connect-timeout 5 --max-time 1800 -X POST -H "Authorization: Bearer $${INTERNAL_JOB_TOKEN}" http://app:3004/api/internal/jobs/run; then
             date +%s > /tmp/.last-success;
             rm -f /tmp/.last-start;
           fi;
@@ -310,10 +308,7 @@ services:
         while true; do
           target="/backups/spottex-$$(date +%Y%m%d-%H%M%S).dump.enc";
           rm -f "$${target}.tmp";
-          if PGPASSWORD="$${POSTGRES_PASSWORD}" pg_dump -h db -U "$${POSTGRES_USER}"
-          -d "$${POSTGRES_DB}" -Fc |
-          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_ENCRYPTION_PASSPHRASE
-          -out "$${target}.tmp"; then
+          if PGPASSWORD="$${POSTGRES_PASSWORD}" pg_dump -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Fc | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_ENCRYPTION_PASSPHRASE -out "$${target}.tmp"; then
             mv "$${target}.tmp" "$${target}";
             date +%s > /backups/.last-success.tmp;
             mv /backups/.last-success.tmp /backups/.last-success;

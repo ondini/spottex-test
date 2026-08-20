@@ -1,7 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-const schemas = ["analytics", "auth", "consultation", "content", "general", "jobs", "payment"];
+const schemas = [
+  "analytics",
+  "auth",
+  "consultation",
+  "content",
+  "general",
+  "jobs",
+  "payment",
+  "tariff",
+];
 
 function identifier(name: string, value: string | undefined) {
   if (!value || !/^[a-z_][a-z0-9_]{0,62}$/.test(value)) throw new Error(`${name} must be a safe PostgreSQL role identifier`);
