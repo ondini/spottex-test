@@ -37,6 +37,29 @@ describe("energy data quality", () => {
     expect(quality.invalidDurationIntervals).toBe(1);
   });
 
+  it("explains sparse cloud history after enough equivalent days were measured", () => {
+    const first = intervals(96 * 4);
+    const last = intervals(96 * 4).map((item) => ({
+      ...item,
+      startAt: new Date(item.startAt.getTime() + 26 * 86_400_000),
+      endAt: new Date(item.endAt.getTime() + 26 * 86_400_000),
+    }));
+    const sparse = [...first, ...last];
+    const quality = summarizeEnergyDataQuality({
+      production: sparse,
+      consumption: sparse,
+      minimumDays: 7,
+    });
+
+    expect(quality).toMatchObject({
+      coverageDays: 8,
+      readyForEstimate: false,
+      confidence: "LOW",
+    });
+    expect(quality.message).toContain("v časovém rozsahu historie pokrývají jen");
+    expect(quality.message).toContain("SolaX cloud");
+  });
+
   it("detects duplicate starts and overlapping intervals before simulation", () => {
     const production = intervals(96 * 8);
     production.push({ ...production[10] });
