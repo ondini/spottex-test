@@ -27,6 +27,8 @@ volitelného řádku v hostitelském `.env.production`.
 Obnovený access/refresh token se ukládá i tehdy, když SolaX cache ještě
 nepřipravila požadovaný historický interval. Rotující refresh token se tím
 neztratí mezi opakovanými pokusy a import nevyžaduje nové připojení účtu.
+Prázdný starší blok se považuje za skutečně prázdný bez dalších odkladů, jakmile
+už některý pozdější blok stejného měniče prokazatelně obsahuje naměřená data.
 
 Po uzavření celé dávky se automaticky vytvoří základní analýza, pokud je
 historie dostatečná a profil obsahuje výkon FVE a kapacitu baterie. Odklad nebo
