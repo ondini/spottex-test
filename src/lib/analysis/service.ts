@@ -8,6 +8,7 @@ import { z } from "zod";
 import { queueEmail } from "@/lib/email";
 import { getCostsCatalogSummary } from "@/lib/costs/client";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
+import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
 import { prepareAnalysisDefaults } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
 import { calculateAnnualControlOffer } from "@/lib/commerce/service-offer";
@@ -456,8 +457,8 @@ export async function getAnalysisWorkspace(
         : [];
     }),
   );
-  const historyImportBySite = new Map(
-    runningHistoryImports.map((run) => [run.energySiteId, run] as const),
+  const historyImportBySite = aggregateHistoryProgressBySite(
+    runningHistoryImports,
   );
   const standardCatalogReady = publishedProductVersions > 0 && publishedDistributionVersions > 0;
   return {
