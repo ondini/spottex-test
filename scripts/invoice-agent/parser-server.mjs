@@ -78,7 +78,27 @@ function run(command, args, options = {}) {
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (code === 0) resolve(Buffer.concat(stdout));
-      else reject(new Error(`PARSER_PROCESS_FAILED:${command}:${code ?? signal}`));
+      else {
+        const diagnostic = Buffer.concat(stderr).toString("utf8").toLowerCase();
+        const reason =
+          diagnostic.includes("refresh_token_invalidated") ||
+          diagnostic.includes("token_revoked") ||
+          diagnostic.includes("refresh token was revoked")
+            ? "AUTH_REVOKED"
+            : diagnostic.includes("401 unauthorized")
+              ? "AUTH_UNAUTHORIZED"
+              : diagnostic.includes("429") || diagnostic.includes("rate limit")
+                ? "RATE_LIMITED"
+                : signal === "SIGKILL"
+                  ? "TIMEOUT_OR_OUTPUT_LIMIT"
+                  : "FAILED";
+        // Never emit raw stderr: Codex CLI output can contain document text.
+        reject(
+          new Error(
+            `PARSER_PROCESS_FAILED:${command}:${reason}:${code ?? signal}`,
+          ),
+        );
+      }
     });
     if (options.input) child.stdin.end(options.input);
   });
