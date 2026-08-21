@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { supersedeSiteAnalyses } from "@/lib/analysis/invalidation";
 
 import { accessTokenExpiresAt, LegacySpottexClient } from "./legacy-client";
+import { serializeCustomerInvoiceRequest } from "./invoice-view";
 import { EnergyError } from "./types";
 
 const nullableNumber = (minimum: number, maximum: number) =>
@@ -172,7 +173,7 @@ async function ownedSite(userId: number, siteId: number) {
       invoiceRequests: {
         orderBy: { createdAt: "desc" },
         take: 1,
-        include: { documents: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 10 } },
+        include: { documents: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 3 } },
       },
       pvArrays: { orderBy: { id: "asc" } },
       controlledAppliances: { orderBy: { id: "asc" } },
@@ -528,20 +529,7 @@ function serializeSite(site: Awaited<ReturnType<typeof ownedSite>>, warning: str
       analysisAt: site.technicalProfile?.analysisConfirmedAt?.toISOString() ?? null,
       controlAt: site.technicalProfile?.controlConfirmedAt?.toISOString() ?? null,
     },
-    invoiceRequest: site.invoiceRequests[0] ? {
-      referenceCode: site.invoiceRequests[0].referenceCode,
-      contactEmail: site.invoiceRequests[0].contactEmail,
-      status: site.invoiceRequests[0].status,
-      createdAt: site.invoiceRequests[0].createdAt.toISOString(),
-      documents: site.invoiceRequests[0].documents.map((document) => ({
-        id: document.id,
-        originalFileName: document.originalFileName,
-        mimeType: document.mimeType,
-        sizeBytes: document.sizeBytes,
-        retainedUntil: document.retainedUntil.toISOString(),
-        createdAt: document.createdAt.toISOString(),
-      })),
-    } : null,
+    invoiceRequest: serializeCustomerInvoiceRequest(site.invoiceRequests[0] ?? null),
     pvArrays: site.pvArrays.map((array) => ({
       id: array.id,
       name: array.name,

@@ -436,6 +436,7 @@ Všechna hesla vložená do PostgreSQL URL musí být URL-encoded. Backup image 
 | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI` | propojení administrátora s Google Calendar a Meet |
 | `PAYMENT_PROVIDER=FREE`, `FREE_ACCESS_MODE=true`, `NEXT_PUBLIC_FREE_ACCESS_MODE=true` | současný bezplatný provoz bez platební brány; vývoj může používat `MOCK` |
 | `SPOTTEX_LEGACY_API_URL`, `SPOTTEX_LEGACY_FERNET_KEY` | živé napojení na existující Spottex API; produkční URL musí být HTTPS |
+| `SPOTTEX_LEGACY_HISTORY_PATH`, `SPOTTEX_LEGACY_MARKET_PATH` | volitelné přepsání výchozích šifrovaných cest `/history_intervals` a `/market_intervals` |
 | `ALLOW_INSECURE_LEGACY_HTTP` | explicitní override TLS kontroly; produkční výchozí a doporučená hodnota je `false` |
 | `GRIDLINK_API_URL`, `GRIDLINK_API_TOKEN` | rezervováno pro plný GridLink adaptér |
 | `ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD` | seedovaný admin; produkční heslo musí mít 14 znaků až 72 UTF-8 bytů, nesmí být placeholder a vždy přepíše jeho hash |
@@ -630,6 +631,8 @@ AUTH_URL=https://spottex.cz
 DEV_AUTO_VERIFY_EMAIL=false
 SPOTTEX_LEGACY_API_URL=https://legacy-api.internal.spottex.cz
 SPOTTEX_LEGACY_FERNET_KEY=<platny-32-byte-fernet-klic>
+SPOTTEX_LEGACY_HISTORY_PATH=/history_intervals
+SPOTTEX_LEGACY_MARKET_PATH=/market_intervals
 ALLOW_INSECURE_LEGACY_HTTP=false
 ```
 

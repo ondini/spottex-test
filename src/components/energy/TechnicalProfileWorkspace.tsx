@@ -1,11 +1,12 @@
 "use client";
 
-import { BarChart3, CheckCircle2, FileUp, LoaderCircle } from "lucide-react";
+import { BarChart3, CheckCircle2, LoaderCircle } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { PageHeader } from "@/components/app-shell/PagePrimitives";
+import { InvoiceProcessingPanel, type InvoiceRequestView } from "@/components/energy/InvoiceProcessingPanel";
 
 type Source = "SOLAX" | "LEGACY_API" | "EAN_LOOKUP" | "INVOICE" | "USER" | "CATALOG" | "MODEL" | "ADMIN";
 type Evidence = Record<string, { source: Source; observedAt: string; confirmedAt: string | null }>;
@@ -38,8 +39,6 @@ type ProfileValues = {
   fixedPriceValidUntil: string | null;
   hdoStatus: string | null;
 };
-type InvoiceDocument = { id: string; originalFileName: string; mimeType: string; sizeBytes: number; retainedUntil: string; createdAt: string };
-type InvoiceRequest = { referenceCode: string; contactEmail: string; status: string; createdAt: string; documents: InvoiceDocument[] };
 type HistoryImport = { id: string; status: string; requestedFrom: string; requestedTo: string; totalChunks: number; succeededChunks: number; failedChunks: number; importedPoints: number; lastError: string | null };
 type PvArray = {
   id?: number;
@@ -75,7 +74,7 @@ type SiteProfile = {
     controlMissing: string[];
   };
   confirmations: { analysisAt: string | null; controlAt: string | null };
-  invoiceRequest: InvoiceRequest | null;
+  invoiceRequest: InvoiceRequestView | null;
   historyImport: HistoryImport | null;
   pvArrays: PvArray[];
   controlledAppliances: ControlledAppliance[];
@@ -218,43 +217,12 @@ export function TechnicalProfileWorkspace({ initialWorkspace }: { initialWorkspa
     void saveProfile(event.currentTarget);
   }
 
-  async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setPending(true);
-    setMessage(null);
-    try {
-      const requestResponse = await fetch(`/api/app/energy/sites/${profile.site.id}/invoice-request`, { method: "POST" });
-      const requestPayload = await requestResponse.json() as { invoiceRequest?: Omit<InvoiceRequest, "documents">; error?: string };
-      if (!requestResponse.ok || !requestPayload.invoiceRequest) throw new Error(requestPayload.error || "Požadavek se nepodařilo vytvořit.");
-      const form = new FormData();
-      form.set("file", file);
-      const response = await fetch(`/api/app/energy/sites/${profile.site.id}/invoice-document`, { method: "POST", body: form });
-      const payload = await response.json() as { document?: InvoiceDocument; error?: string };
-      if (!response.ok || !payload.document) {
-        const labels: Record<string, string> = {
-          DOCUMENT_TOO_LARGE: "Faktura může mít nejvýše 10 MB.",
-          UNSUPPORTED_DOCUMENT: "Nahrajte PDF, JPG nebo PNG fakturu.",
-          DOCUMENT_TYPE_MISMATCH: "Přípona souboru neodpovídá jeho skutečnému typu.",
-          DUPLICATE_DOCUMENT: "Tuto fakturu už u elektrárny evidujeme.",
-        };
-        throw new Error(labels[payload.error || ""] || "Fakturu se nepodařilo bezpečně uložit.");
-      }
-      const invoiceRequest: InvoiceRequest = {
-        ...requestPayload.invoiceRequest,
-        documents: [payload.document, ...(profile.invoiceRequest?.documents ?? [])],
-      };
-      setWorkspace((current) => ({ ...current, profile: { ...current.profile, invoiceRequest } }));
-      setMessage("Faktura byla bezpečně uložená. Po načtení údajů je před použitím zkontrolujeme.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Fakturu se nepodařilo uložit.");
-    } finally {
-      setPending(false);
-    }
+  async function refreshProfile() {
+    const response = await fetch(`/api/app/energy/sites/${profile.site.id}/profile`, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({})) as { workspace?: Workspace; error?: string };
+    if (!response.ok || !payload.workspace) throw new Error(payload.error || "Profil se nepodařilo znovu načíst.");
+    setWorkspace(payload.workspace);
   }
-
-  const invoice = profile.invoiceRequest;
 
   return (
     <div className="space-y-6">
@@ -280,45 +248,19 @@ export function TechnicalProfileWorkspace({ initialWorkspace }: { initialWorkspa
         </div>
       )}
 
-      <section id="vlastni-tarif" className="app-card scroll-mt-24 p-5 sm:p-6">
-        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
-          <div>
-            <h2 className="font-semibold text-slate-900">Zadat údaje pomocí faktury</h2>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-              Nahrajte PDF nebo fotografii faktury. Získané údaje před použitím zobrazíme ke kontrole a uložíme je k této elektrárně.
-            </p>
-            {requestedForControl && profile.readiness.controlMissing.length > 0 && (
-              <p className="mt-3 text-sm font-medium text-amber-800">
-                Pro přesný výpočet a nastavení řízení doplníme: {profile.readiness.controlMissing.map((field) => fieldLabels[field] || field).join(", ")}.
-              </p>
-            )}
-            {requestedForTariff && (
-              <p className="mt-3 text-sm font-medium text-amber-800">
-                Pro výpočet podle vašeho tarifu potřebujeme znát skutečné ceny.
-                Nahrajte fakturu a údaje z ní připravíme ke kontrole, abyste
-                nemuseli všechna pole vyplňovat ručně.
-              </p>
-            )}
-            {invoice?.documents?.length ? (
-              <ul className="mt-3 space-y-1 text-xs text-slate-600">
-                {invoice.documents.map((document) => (
-                  <li key={document.id}>
-                    <a className="font-medium text-brand-700 hover:underline" href={`/api/app/energy/invoice-documents/${document.id}`}>
-                      {document.originalFileName}
-                    </a>
-                    {" · "}{(document.sizeBytes / 1024).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} kB
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-          <label className="app-button shrink-0 cursor-pointer">
-            <FileUp className="size-4" />
-            {pending ? "Ukládám…" : "Nahrát fakturu"}
-            <input className="sr-only" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" disabled={pending} onChange={(event) => void uploadInvoice(event)} />
-          </label>
-        </div>
-      </section>
+      {(requestedForControl && profile.readiness.controlMissing.length > 0) || requestedForTariff ? (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+          {requestedForTariff
+            ? "Pro výpočet podle vašeho tarifu potřebujeme skutečné ceny. Nahrajte fakturu a připravené údaje před uložením zkontrolujte."
+            : `Pro přesný výpočet a nastavení řízení doplníme: ${profile.readiness.controlMissing.map((field) => fieldLabels[field] || field).join(", ")}.`}
+        </p>
+      ) : null}
+
+      <InvoiceProcessingPanel
+        siteId={profile.site.id}
+        initialRequest={profile.invoiceRequest}
+        onProfileSaved={refreshProfile}
+      />
 
       <form
         ref={formRef}

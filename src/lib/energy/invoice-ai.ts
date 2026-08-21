@@ -7,9 +7,12 @@ import { prisma } from "@/lib/prisma";
 const nullableText = z.string().trim().max(300).nullable();
 const nullableNumber = z.number().finite().nullable();
 
+export const INVOICE_AI_SCHEMA_VERSION = "energy-invoice-ai-v2" as const;
+export const INVOICE_AI_FAILED_MARKER = "ai-codex-v2-failed" as const;
+
 export const invoiceAiDraftSchema = z
   .object({
-    schemaVersion: z.literal("energy-invoice-ai-v1"),
+    schemaVersion: z.enum(["energy-invoice-ai-v1", INVOICE_AI_SCHEMA_VERSION]),
     billingPeriodFrom: z.string().date().nullable(),
     billingPeriodTo: z.string().date().nullable(),
     values: z
@@ -84,7 +87,7 @@ export async function persistInvoiceAiDraft(
     });
     if (!document) throw new Error("INVOICE_AI_DOCUMENT_NOT_FOUND");
     const existing = await tx.energyInvoiceExtraction.findFirst({
-      where: { documentId, method: "AI_CODEX_DRAFT" },
+      where: { documentId, method: "AI_CODEX_DRAFT", schemaVersion: draft.schemaVersion },
       select: { id: true },
     });
     if (existing) return { id: existing.id, duplicate: true };
@@ -110,7 +113,7 @@ export async function persistInvoiceAiDraft(
       data: {
         billingPeriodFrom,
         billingPeriodTo,
-        extractionVersion: `ai-codex-draft-v${version}`,
+        extractionVersion: `${draft.schemaVersion === INVOICE_AI_SCHEMA_VERSION ? "ai-codex-v2" : "ai-codex-v1"}-draft-v${version}`,
         extractedData: draft as unknown as Prisma.InputJsonValue,
       },
     });

@@ -38,6 +38,17 @@ describe("invoice AI draft", () => {
     ).toBe(25);
   });
 
+  it("accepts the current parser schema revision", () => {
+    expect(invoiceAiDraftSchema.safeParse({
+      schemaVersion: "energy-invoice-ai-v2",
+      billingPeriodFrom: "2026-01-01",
+      billingPeriodTo: "2026-02-01",
+      values,
+      fieldEvidence: [],
+      warnings: [],
+    }).success).toBe(true);
+  });
+
   it("rejects an inverted billing period and unknown fields", () => {
     expect(
       invoiceAiDraftSchema.safeParse({

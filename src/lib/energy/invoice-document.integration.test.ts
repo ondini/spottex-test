@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/prisma";
-import { readEnergyInvoiceDocument, uploadEnergyInvoiceDocument } from "./invoice-document";
+import { ENERGY_INVOICE_MAX_DOCUMENTS, readEnergyInvoiceDocument, uploadEnergyInvoiceDocument } from "./invoice-document";
 import { reviewEnergyInvoice } from "./invoice-review";
 
 const run = process.env.RUN_DB_INTEGRATION_TESTS === "true" ? describe : describe.skip;
@@ -63,6 +63,21 @@ run("secure energy invoice documents", () => {
       declaredMimeType: "application/pdf",
       bytes: original,
     })).rejects.toThrow("DUPLICATE_DOCUMENT");
+  });
+
+  it("accepts at most three complementary invoices in one request", async () => {
+    for (let index = 2; index <= ENERGY_INVOICE_MAX_DOCUMENTS; index += 1) {
+      await expect(uploadEnergyInvoiceDocument(ownerId, siteId, {
+        originalFileName: `faktura-${index}.pdf`,
+        declaredMimeType: "application/pdf",
+        bytes: Buffer.from(`%PDF-1.7\ninvoice fixture ${index}\n%%EOF`),
+      })).resolves.toMatchObject({ originalFileName: `faktura-${index}.pdf` });
+    }
+    await expect(uploadEnergyInvoiceDocument(ownerId, siteId, {
+      originalFileName: "faktura-4.pdf",
+      declaredMimeType: "application/pdf",
+      bytes: Buffer.from("%PDF-1.7\ninvoice fixture 4\n%%EOF"),
+    })).rejects.toThrow("DOCUMENT_LIMIT_REACHED");
   });
 
   it("rejects a document assigned to a different invoice request and versions valid extraction", async () => {

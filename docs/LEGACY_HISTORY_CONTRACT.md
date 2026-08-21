@@ -1,6 +1,6 @@
 # Legacy `history-v1` contract
 
-SpotTEX nikdy nečte databázi legacy/GridLink projektu přímo. Historický import se zapne až nastavením `SPOTTEX_LEGACY_HISTORY_PATH` na šifrovaný endpoint stejného API, které dnes obsluhuje mobilní administraci.
+SpotTEX nikdy nečte databázi legacy/GridLink projektu přímo. Historický import používá šifrovaný endpoint stejného API, které dnes obsluhuje mobilní administraci. Výchozí cesta je `/history_intervals`; `SPOTTEX_LEGACY_HISTORY_PATH` ji přepisuje jen tehdy, když reverse proxy používá jiný prefix.
 
 ## Požadavek
 
@@ -10,7 +10,7 @@ Autentizovaný `GET` používá stávající JWT/Fernet kontrakt a parametry:
 - `from`: ISO-8601 UTC včetně,
 - `to`: ISO-8601 UTC bez koncového bodu.
 
-Jeden požadavek má nejvýše 12 hodin. Endpoint musí ověřit, že přihlášený uživatel vlastní zařízení.
+Jeden požadavek má v platformě nejvýše 20 dní (1 920 čtvrthodin) a backend přijímá nejvýše 31 dní. Endpoint musí ověřit, že přihlášený uživatel vlastní zařízení.
 
 ## Odpověď po dešifrování
 
@@ -36,4 +36,3 @@ Všechny intervaly musí mít přesně 15 minut, ležet uvnitř požadovaného o
 - HTTP `401` používá stávající obnovu tokenu.
 - `429` a `5xx` vedou ve SpotTEXu k exponenciálnímu retry konkrétního bloku, maximálně čtyřikrát.
 - Endpoint nesmí spouštět řízení ani měnit zařízení.
-

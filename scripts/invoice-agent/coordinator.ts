@@ -3,7 +3,11 @@ import http from "node:http";
 import { PrismaClient } from "@prisma/client";
 
 import { decryptBuffer } from "../../src/lib/crypto";
-import { persistInvoiceAiDraft } from "../../src/lib/energy/invoice-ai";
+import {
+  INVOICE_AI_FAILED_MARKER,
+  INVOICE_AI_SCHEMA_VERSION,
+  persistInvoiceAiDraft,
+} from "../../src/lib/energy/invoice-ai";
 
 const prisma = new PrismaClient();
 const socketPath = process.env.INVOICE_PARSER_SOCKET ?? "/run/invoice-parser/parser.sock";
@@ -52,10 +56,23 @@ async function claimNext(): Promise<ClaimedDocument | null> {
       where: {
         deletedAt: null,
         encryptedContent: { not: null },
-        extractions: { none: { method: "AI_CODEX_DRAFT" } },
+        OR: [
+          { extractionVersion: null },
+          { extractionVersion: { not: INVOICE_AI_FAILED_MARKER } },
+        ],
+        extractions: {
+          none: {
+            method: "AI_CODEX_DRAFT",
+            schemaVersion: INVOICE_AI_SCHEMA_VERSION,
+          },
+        },
         invoiceRequest: {
           OR: [
             { status: "RECEIVED" },
+            // A request can contain up to three documents. Completing or
+            // failing one leaves the request in NEEDS_INPUT, but the remaining
+            // documents still have to be parsed.
+            { status: "NEEDS_INPUT" },
             { status: "PROCESSING", updatedAt: { lt: staleBefore } },
           ],
         },
@@ -163,6 +180,10 @@ async function markFailed(document: ClaimedDocument, error: unknown) {
         status: "NEEDS_INPUT",
         notes: "Automatické vytěžení se nepodařilo. Dokument čeká na ruční kontrolu.",
       },
+    }),
+    prisma.energyInvoiceDocument.update({
+      where: { id: document.id },
+      data: { extractionVersion: INVOICE_AI_FAILED_MARKER },
     }),
     prisma.auditLog.create({
       data: {
