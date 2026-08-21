@@ -47,6 +47,14 @@ export class HistoryChunkEmptyError extends Error {
   }
 }
 
+export function shouldRetryEmptyHistoryChunk(input: {
+  attempts: number;
+  maxAttempts: number;
+  hasLaterSuccessfulChunk: boolean;
+}) {
+  return input.attempts < input.maxAttempts && !input.hasLaterSuccessfulChunk;
+}
+
 export function historyChunks(from: Date, to: Date, chunkMs = CHUNK_MS) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from || chunkMs <= 0) throw new Error("HISTORY_IMPORT_INVALID_WINDOW");
   const chunks: Array<{ from: Date; to: Date }> = [];
@@ -242,7 +250,25 @@ async function importChunk(chunkId: string) {
   // it silently skewed every figure derived from the gap. An empty past range
   // is therefore retried on the existing budget and only believed once the
   // budget is spent.
-  if (values.length === 0 && chunk.attempts < chunk.maxAttempts) {
+  const laterSuccessfulChunk = values.length === 0
+    ? await prisma.energyHistoryImportChunk.findFirst({
+        where: {
+          importId: chunk.importId,
+          status: "SUCCEEDED",
+          importedPoints: { gt: 0 },
+          chunkFrom: { gte: chunk.chunkTo },
+        },
+        select: { id: true },
+      })
+    : null;
+  if (
+    values.length === 0 &&
+    shouldRetryEmptyHistoryChunk({
+      attempts: chunk.attempts,
+      maxAttempts: chunk.maxAttempts,
+      hasLaterSuccessfulChunk: laterSuccessfulChunk !== null,
+    })
+  ) {
     throw new HistoryChunkEmptyError(chunk.chunkFrom, chunk.chunkTo);
   }
   for (const value of values) {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { historyChunks } from "./history-import";
+import { historyChunks, shouldRetryEmptyHistoryChunk } from "./history-import";
 
 describe("history import chunking", () => {
   it("splits a window into deterministic non-overlapping chunks", () => {
@@ -20,5 +20,11 @@ describe("history import chunking", () => {
 
   it("rejects reversed windows", () => {
     expect(() => historyChunks(new Date("2026-01-02T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"))).toThrow("HISTORY_IMPORT_INVALID_WINDOW");
+  });
+
+  it("accepts a genuinely empty older range after a later range has data", () => {
+    expect(shouldRetryEmptyHistoryChunk({ attempts: 2, maxAttempts: 8, hasLaterSuccessfulChunk: true })).toBe(false);
+    expect(shouldRetryEmptyHistoryChunk({ attempts: 2, maxAttempts: 8, hasLaterSuccessfulChunk: false })).toBe(true);
+    expect(shouldRetryEmptyHistoryChunk({ attempts: 8, maxAttempts: 8, hasLaterSuccessfulChunk: false })).toBe(false);
   });
 });
