@@ -20,6 +20,7 @@ function encryptedResponse(payload: unknown): Response {
 describe("LegacySpottexClient transport contract", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("encrypts SolaX credentials before calling the legacy login contract", async () => {
@@ -325,5 +326,30 @@ describe("LegacySpottexClient transport contract", () => {
     expect(dashboard.issues).toEqual([
       expect.objectContaining({ section: "prices" }),
     ]);
+  });
+
+  it("uses the deployed encrypted history endpoint when no path override is configured", async () => {
+    vi.stubEnv("SPOTTEX_LEGACY_HISTORY_PATH", "");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/history_intervals");
+      expect(url.searchParams.get("device_id")).toBe("99");
+      expect(url.searchParams.get("from")).toBe("2026-01-01T00:00:00.000Z");
+      expect(url.searchParams.get("to")).toBe("2026-01-02T00:00:00.000Z");
+      return encryptedResponse({ intervals: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new LegacySpottexClient({
+      baseUrl: "https://energy.example.test",
+      fernetKey: FERNET_KEY,
+      tokens: { accessToken: "access-token", refreshToken: "refresh-token" },
+    });
+    await expect(client.fetchHistoricalIntervals(
+      "99",
+      new Date("2026-01-01T00:00:00.000Z"),
+      new Date("2026-01-02T00:00:00.000Z"),
+    )).resolves.toEqual({ intervals: [] });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

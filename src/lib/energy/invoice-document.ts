@@ -7,6 +7,7 @@ import { decryptBuffer, encryptBuffer } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 
 export const ENERGY_INVOICE_MAX_BYTES = 10 * 1024 * 1024;
+export const ENERGY_INVOICE_MAX_DOCUMENTS = 3;
 const ACCEPTED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "png"]);
 
 type UploadInput = {
@@ -62,11 +63,18 @@ export async function uploadEnergyInvoiceDocument(userId: number, siteId: number
       select: { id: true, energySiteId: true, referenceCode: true },
     });
     if (!request) throw new Error("INVOICE_REQUEST_NOT_FOUND");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`energy-invoice-upload:${request.id}`}))`;
     const duplicate = await tx.energyInvoiceDocument.findUnique({
       where: { invoiceRequestId_contentSha256: { invoiceRequestId: request.id, contentSha256 } },
       select: { id: true, deletedAt: true },
     });
     if (duplicate && !duplicate.deletedAt) throw new Error("DUPLICATE_DOCUMENT");
+    const activeDocuments = await tx.energyInvoiceDocument.count({
+      where: { invoiceRequestId: request.id, deletedAt: null },
+    });
+    if (activeDocuments >= ENERGY_INVOICE_MAX_DOCUMENTS) {
+      throw new Error("DOCUMENT_LIMIT_REACHED");
+    }
     const now = new Date();
     const retainedUntil = new Date(now.getTime() + retentionDays() * 86_400_000);
     const document = duplicate
@@ -178,6 +186,7 @@ export function documentUploadError(error: unknown) {
     UNSUPPORTED_DOCUMENT: 415,
     DOCUMENT_TYPE_MISMATCH: 415,
     DUPLICATE_DOCUMENT: 409,
+    DOCUMENT_LIMIT_REACHED: 409,
     INVOICE_REQUEST_NOT_FOUND: 404,
   };
   return { code, status: statuses[code] ?? 500 };

@@ -11,6 +11,31 @@ const nullableText = z.string().trim().max(300).nullable().optional();
 const nullableNumber = (min: number, max: number) =>
   z.number().finite().min(min).max(max).nullable().optional();
 
+export const invoiceExtractedValuesSchema = z
+  .object({
+    ean: nullableText,
+    address: nullableText,
+    distributorCode: nullableText,
+    distributionTariffCode: nullableText,
+    phases: z.number().int().min(1).max(3).nullable().optional(),
+    mainFuseA: nullableNumber(1, 1_000),
+    buyPricingMode: z.enum(["FIX", "SPOT", "OTHER"]).nullable().optional(),
+    sellPricingMode: z.enum(["FIX", "SPOT", "OTHER"]).nullable().optional(),
+    currentSupplierName: nullableText,
+    currentProductName: nullableText,
+    monthlySupplierFeeCzk: nullableNumber(0, 100_000),
+    fixedBuyPriceCzkKwh: nullableNumber(-1_000, 1_000),
+    fixedSellPriceCzkKwh: nullableNumber(-1_000, 1_000),
+    spotBuyFeeCzkKwh: nullableNumber(-1_000, 1_000),
+    spotSellFeeCzkKwh: nullableNumber(-1_000, 1_000),
+    fixedPriceValidUntil: z.string().datetime().nullable().optional(),
+    hdoStatus: z
+      .enum(["EXACT", "USER_CONFIRMED", "MODELED", "MISSING"])
+      .nullable()
+      .optional(),
+  })
+  .strict();
+
 export const invoiceReviewSchema = z
   .object({
     status: z.enum([
@@ -24,35 +49,17 @@ export const invoiceReviewSchema = z
     documentId: z.string().trim().min(1).max(100).nullable().optional(),
     billingPeriodFrom: z.string().date().nullable().optional(),
     billingPeriodTo: z.string().date().nullable().optional(),
-    extracted: z
-      .object({
-        ean: nullableText,
-        address: nullableText,
-        distributorCode: nullableText,
-        distributionTariffCode: nullableText,
-        phases: z.number().int().min(1).max(3).nullable().optional(),
-        mainFuseA: nullableNumber(1, 1_000),
-        buyPricingMode: z.enum(["FIX", "SPOT", "OTHER"]).nullable().optional(),
-        sellPricingMode: z.enum(["FIX", "SPOT", "OTHER"]).nullable().optional(),
-        currentSupplierName: nullableText,
-        currentProductName: nullableText,
-        monthlySupplierFeeCzk: nullableNumber(0, 100_000),
-        fixedBuyPriceCzkKwh: nullableNumber(-1_000, 1_000),
-        fixedSellPriceCzkKwh: nullableNumber(-1_000, 1_000),
-        spotBuyFeeCzkKwh: nullableNumber(-1_000, 1_000),
-        spotSellFeeCzkKwh: nullableNumber(-1_000, 1_000),
-        fixedPriceValidUntil: z.string().datetime().nullable().optional(),
-        hdoStatus: z
-          .enum(["EXACT", "USER_CONFIRMED", "MODELED", "MISSING"])
-          .nullable()
-          .optional(),
-      })
-      .strict()
-      .default({}),
+    extracted: invoiceExtractedValuesSchema.default({}),
   })
   .strict();
 
 export type InvoiceReviewInput = z.infer<typeof invoiceReviewSchema>;
+
+type InvoiceReviewOptions = {
+  ownerUserId?: number;
+  confirmEvidence?: boolean;
+  notifyCustomer?: boolean;
+};
 
 const SITE_FIELDS = new Set(["ean", "address"]);
 
@@ -66,10 +73,16 @@ export async function reviewEnergyInvoice(
   actorUserId: number,
   requestId: string,
   raw: unknown,
+  options: InvoiceReviewOptions = {},
 ) {
   const input = invoiceReviewSchema.parse(raw);
-  const request = await prisma.energyInvoiceRequest.findUnique({
-    where: { id: requestId },
+  const request = await prisma.energyInvoiceRequest.findFirst({
+    where: {
+      id: requestId,
+      ...(options.ownerUserId == null
+        ? {}
+        : { energySite: { userId: options.ownerUserId } }),
+    },
     include: {
       documents: { where: { deletedAt: null }, select: { id: true } },
       energySite: {
@@ -151,6 +164,9 @@ export async function reviewEnergyInvoice(
           source: EnergyValueSource.INVOICE,
           sourceReference: request.referenceCode,
           observedAt: now,
+          ...(options.confirmEvidence
+            ? { confirmedAt: now, confirmedByUserId: actorUserId }
+            : {}),
         },
       });
     }
@@ -213,7 +229,9 @@ export async function reviewEnergyInvoice(
     await tx.auditLog.create({
       data: {
         actorUserId,
-        action: "ENERGY_INVOICE_REVIEWED",
+        action: options.confirmEvidence
+          ? "ENERGY_INVOICE_CUSTOMER_CONFIRMED"
+          : "ENERGY_INVOICE_REVIEWED",
         entityType: "EnergyInvoiceRequest",
         entityId: request.id,
         metadata: {
@@ -229,7 +247,7 @@ export async function reviewEnergyInvoice(
     });
     return updated;
   });
-  if (["NEEDS_INPUT", "CONFIRMED"].includes(input.status)) {
+  if (options.notifyCustomer !== false && ["NEEDS_INPUT", "CONFIRMED"].includes(input.status)) {
     const confirmed = input.status === "CONFIRMED";
     await queueEmail({
       idempotencyKey: `energy-invoice:${request.id}:${input.status}:${result.updatedAt.toISOString()}`,

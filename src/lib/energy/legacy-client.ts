@@ -466,14 +466,7 @@ export class LegacySpottexClient {
   }
 
   async fetchHistoricalIntervals(deviceId: string, from: Date, to: Date): Promise<unknown> {
-    const configuredPath = process.env.SPOTTEX_LEGACY_HISTORY_PATH;
-    if (!configuredPath) {
-      throw new EnergyError(
-        "LEGACY_UNAVAILABLE",
-        "Legacy server zatím nevystavuje bezpečný endpoint pro historické intervaly. Nastavte SPOTTEX_LEGACY_HISTORY_PATH až po jeho nasazení.",
-        503,
-      );
-    }
+    const configuredPath = process.env.SPOTTEX_LEGACY_HISTORY_PATH || "/history_intervals";
     const url = new URL(configuredPath, this.baseUrl);
     url.searchParams.set("device_id", deviceId);
     url.searchParams.set("from", from.toISOString());
