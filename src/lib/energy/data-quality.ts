@@ -222,6 +222,8 @@ export function summarizeEnergyDataQuality(input: {
         : `Máme ${completeDaysLabel(roundedDays)} dat. Výsledek bude označený jako orientační.`
       : balanceCanBlock && balanceFailureRate > 0.05
         ? `Energetická bilance nesedí u ${Math.round(balanceFailureRate * 100)} % úplných intervalů. Před analýzou je nutná kontrola znamének a jednotek.`
+        : coverageDays >= minimumDays && coveragePercent < 75
+          ? `Máme ${completeDaysLabel(roundedDays)} měření, ale v časovém rozsahu historie pokrývají jen ${Math.round(coveragePercent * 10) / 10} %. Pro bezpečný odhad je potřeba alespoň 75 %; SolaX cloud v chybějících obdobích nevrátil data.`
         : `Pro první odhad potřebujeme alespoň ${minimumDays} úplných dní v 15minutových intervalech.`,
   };
 }
