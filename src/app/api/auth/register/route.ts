@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { strongPasswordSchema } from "@/lib/auth/password";
+import { emailVerificationUrl } from "@/lib/auth/verification-url";
 import { protectEmailBody } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit, rateLimitedResponse } from "@/lib/security/rate-limit";
@@ -42,8 +43,7 @@ export async function POST(request: Request) {
   const verificationTokenHash = tokenHash(verificationToken);
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
-  const baseUrl = (process.env.APP_URL || process.env.AUTH_URL || "http://localhost:3004").replace(/\/$/, "");
-  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(verificationToken)}`;
+  const verifyUrl = emailVerificationUrl(verificationToken);
 
   try {
     await prisma.$transaction(async (tx) => {

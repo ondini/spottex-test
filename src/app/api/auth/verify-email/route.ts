@@ -2,16 +2,17 @@ import { createHash } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
+import { publicAppUrl } from "@/lib/auth/verification-url";
 import { prisma } from "@/lib/prisma";
 
 function redirectToLogin(request: Request, params: Record<string, string>) {
-  const url = new URL("/prihlaseni", request.url);
+  const url = publicAppUrl("/prihlaseni", request.url);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return NextResponse.redirect(url, request.method === "POST" ? 303 : 307);
 }
 
 function redirectToConfirmation(request: Request, token: string) {
-  const url = new URL("/overit-email", request.url);
+  const url = publicAppUrl("/overit-email", request.url);
   url.searchParams.set("token", token);
   return NextResponse.redirect(url);
 }

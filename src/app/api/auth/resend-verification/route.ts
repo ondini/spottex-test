@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { emailVerificationUrl } from "@/lib/auth/verification-url";
 import { prisma } from "@/lib/prisma";
 import { protectEmailBody } from "@/lib/email";
 import { consumeRateLimit, rateLimitedResponse } from "@/lib/security/rate-limit";
@@ -33,8 +34,7 @@ export async function POST(request: Request) {
 
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const baseUrl = (process.env.APP_URL || process.env.AUTH_URL || "http://localhost:3004").replace(/\/$/, "");
-  const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+  const verifyUrl = emailVerificationUrl(token);
 
   await prisma.$transaction(async (tx) => {
     await tx.emailVerification.deleteMany({ where: { userId: user.id, consumedAt: null } });
