@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateEnergyDataQualityCache } from "./data-quality";
 import { accessTokenExpiresAt, LegacySpottexClient } from "./legacy-client";
 import { upsertMeasuredIntervalsBulk } from "./interval-write";
-import { EnergyError } from "./types";
+import { EnergyError, type LegacyTokenSet } from "./types";
 
 export const ENERGY_HISTORY_CHUNK_JOB = "ENERGY_HISTORY_CHUNK_V1";
 // Twenty days stays below the encrypted endpoint's 2,000-point limit
@@ -54,6 +54,51 @@ export function historyChunks(from: Date, to: Date, chunkMs = CHUNK_MS) {
     chunks.push({ from: new Date(cursor), to: new Date(Math.min(to.getTime(), cursor + chunkMs)) });
   }
   return chunks;
+}
+
+type HistoryTokenClient = Pick<
+  LegacySpottexClient,
+  "fetchHistoricalIntervals" | "getTokens"
+>;
+
+/**
+ * A refresh token can rotate before the history endpoint reports that its
+ * cache is ready. Persist the rotated pair even when that endpoint then
+ * rejects the request; otherwise every retry starts with the invalidated pair
+ * and can never recover without reconnecting the SolaX account.
+ */
+export async function fetchHistoryWithDurableTokens(
+  connection: { id: number; encryptedRefreshToken: string | null },
+  before: LegacyTokenSet,
+  client: HistoryTokenClient,
+  deviceId: string,
+  from: Date,
+  to: Date,
+) {
+  try {
+    return await client.fetchHistoricalIntervals(deviceId, from, to);
+  } finally {
+    const after = client.getTokens();
+    if (
+      after &&
+      (after.accessToken !== before.accessToken ||
+        after.refreshToken !== before.refreshToken)
+    ) {
+      // Do not overwrite a still newer token pair saved by a concurrent
+      // dashboard request.
+      await prisma.energyConnection.updateMany({
+        where: {
+          id: connection.id,
+          encryptedRefreshToken: connection.encryptedRefreshToken,
+        },
+        data: {
+          encryptedAccessToken: encryptSecret(after.accessToken),
+          encryptedRefreshToken: encryptSecret(after.refreshToken),
+          tokenExpiresAt: accessTokenExpiresAt(after.accessToken),
+        },
+      });
+    }
+  }
 }
 
 export async function requestHistoryImport(userId: number, siteId: number, days = 365) {
@@ -180,7 +225,16 @@ async function importChunk(chunkId: string) {
   if (!connection?.encryptedAccessToken || !connection.encryptedRefreshToken) throw new Error("HISTORY_CONNECTION_MISSING");
   const before = { accessToken: decryptSecret(connection.encryptedAccessToken), refreshToken: decryptSecret(connection.encryptedRefreshToken) };
   const client = new LegacySpottexClient({ tokens: before });
-  const values = responseSchema.parse(await client.fetchHistoricalIntervals(run.inverter.externalDeviceId, chunk.chunkFrom, chunk.chunkTo));
+  const values = responseSchema.parse(
+    await fetchHistoryWithDurableTokens(
+      connection,
+      before,
+      client,
+      run.inverter.externalDeviceId,
+      chunk.chunkFrom,
+      chunk.chunkTo,
+    ),
+  );
   // The backend downloads a freshly connected SolaX plant in resumable slices
   // that can take hours, and answers ranges it has not reached yet with an
   // empty list rather than an error. Accepting that as "no data" is what left
@@ -216,10 +270,6 @@ async function importChunk(chunkId: string) {
       reason: "Historická data elektrárny byla znovu načtena.",
       actorUserId: run.energySite.userId,
     });
-    const after = client.getTokens();
-    if (after && (after.accessToken !== before.accessToken || after.refreshToken !== before.refreshToken)) {
-      await tx.energyConnection.update({ where: { id: connection.id }, data: { encryptedAccessToken: encryptSecret(after.accessToken), encryptedRefreshToken: encryptSecret(after.refreshToken), tokenExpiresAt: accessTokenExpiresAt(after.accessToken) } });
-    }
     await tx.energyHistoryImportChunk.update({ where: { id: chunk.id }, data: { status: "SUCCEEDED", importedPoints: values.length, completedAt: new Date(), lastError: null } });
   }, { timeout: 120_000 });
   invalidateEnergyDataQualityCache(run.energySiteId);

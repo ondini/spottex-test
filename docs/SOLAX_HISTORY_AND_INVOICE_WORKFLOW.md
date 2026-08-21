@@ -24,6 +24,10 @@ Produkční Compose předává `SPOTTEX_LEGACY_HISTORY_PATH`, přičemž bezpeč
 výchozí path je přímo v klientovi. Tím se import nerozbije pouhým vynecháním
 volitelného řádku v hostitelském `.env.production`.
 
+Obnovený access/refresh token se ukládá i tehdy, když SolaX cache ještě
+nepřipravila požadovaný historický interval. Rotující refresh token se tím
+neztratí mezi opakovanými pokusy a import nevyžaduje nové připojení účtu.
+
 Po uzavření celé dávky se automaticky vytvoří základní analýza, pokud je
 historie dostatečná a profil obsahuje výkon FVE a kapacitu baterie. Odklad nebo
 chyba se zapisuje do auditu jako `ENERGY_BASE_ANALYSIS_AUTO_DEFERRED`; úspěšné
