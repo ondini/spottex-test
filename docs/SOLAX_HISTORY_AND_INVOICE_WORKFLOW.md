@@ -15,7 +15,7 @@ Stavy importu:
 | Stav | Význam pro uživatele |
 | --- | --- |
 | `QUEUED` / `RUNNING` | Bloky čekají nebo se stahují; dashboard obnovuje stav každých 8 sekund. |
-| `COMPLETED` | Všechny bloky skončily a data prošla kontrolou kvality. |
+| `COMPLETED` | Všechny bloky skončily bez chyby. Dostatečnost naměřených intervalů pro analýzu se vyhodnocuje zvlášť. |
 | `PARTIAL` | Část historie je použitelná, část bloků selhala. |
 | `FAILED` | Není k dispozici žádný použitelný blok; UI musí ukázat chybu, ne nekonečné 0 %. |
 
@@ -29,11 +29,21 @@ nepřipravila požadovaný historický interval. Rotující refresh token se tí
 neztratí mezi opakovanými pokusy a import nevyžaduje nové připojení účtu.
 Prázdný starší blok se považuje za skutečně prázdný bez dalších odkladů, jakmile
 už některý pozdější blok stejného měniče prokazatelně obsahuje naměřená data.
+Producent historie má omezený connect/read timeout a jeho periodický updater
+uzavírá databázovou transakci před každým pomalejším SolaX HTTP voláním. Rotace
+tokenu z paralelního Celery úkolu tak nečeká na zámek řádku předchozího měniče.
 
 Po uzavření celé dávky se automaticky vytvoří základní analýza, pokud je
 historie dostatečná a profil obsahuje výkon FVE a kapacitu baterie. Odklad nebo
 chyba se zapisuje do auditu jako `ENERGY_BASE_ANALYSIS_AUTO_DEFERRED`; úspěšné
 zařazení jako `ENERGY_BASE_ANALYSIS_AUTO_QUEUED`.
+
+U elektrárny s více střídači se kvalita počítá pouze z 15minutových okamžiků,
+ve kterých mají všechny střídače zároveň výrobu i spotřebu. První orientační
+odhad vyžaduje nejméně sedm ekvivalentních dní, alespoň 75% pokrytí časového
+rozsahu a validní energetickou bilanci. Dokončený download proto nemusí znamenat
+spuštěnou analýzu: skutečné mezery v cloudu se nevyplňují vymyšlenými hodnotami
+a přesný důvod odkladu zůstane v auditu.
 
 ### Diagnostika SolaX
 
@@ -45,7 +55,10 @@ zařazení jako `ENERGY_BASE_ANALYSIS_AUTO_QUEUED`.
 3. HTTP 503 s informací o přípravě historie je dočasný stav backendového
    backfillu a má exponenciální retry. Chybějící konfigurace endpointu není
    dočasný stav a nesmí se skrývat jako nekonečný progress.
-4. Po prvním úspěšném bloku ověřit růst `succeededChunks`, `importedPoints` a
+4. Pokud download stojí po obnově autorizace, ověřit čekající databázové zámky
+   nad řádkem `general.inverters`; updater nesmí držet transakci během síťového
+   volání. Každé historické HTTP volání musí mít konečný timeout.
+5. Po prvním úspěšném bloku ověřit růst `succeededChunks`, `importedPoints` a
    počet měřených intervalů. Po dokončení ověřit vznik `EnergyAnalysisRun` nebo
    konkrétní důvod odkladu v auditu.
 
