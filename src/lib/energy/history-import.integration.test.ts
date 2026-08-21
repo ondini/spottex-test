@@ -2,9 +2,15 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 
-import { ENERGY_HISTORY_CHUNK_JOB, recoverStaleHistoryImportJobs, retryHistoryImport } from "./history-import";
+import {
+  ENERGY_HISTORY_CHUNK_JOB,
+  fetchHistoryWithDurableTokens,
+  recoverStaleHistoryImportJobs,
+  retryHistoryImport,
+} from "./history-import";
 
 vi.mock("server-only", () => ({}));
 
@@ -38,6 +44,53 @@ databaseDescribe("history import crash recovery", () => {
     } finally {
       await prisma.scheduledJob.deleteMany({ where: { id: job.id } });
       await prisma.user.delete({ where: { id: user.id } });
+    }
+  });
+
+  it("persists a rotated token pair even when the history request still fails", async () => {
+    const suffix = randomUUID();
+    const previousEncryptionKey = process.env.APP_ENCRYPTION_KEY;
+    process.env.APP_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+    const oldTokens = { accessToken: "old-access", refreshToken: "old-refresh" };
+    const newTokens = {
+      accessToken: `header.${Buffer.from(JSON.stringify({ exp: 2_000_000_000 })).toString("base64url")}.signature`,
+      refreshToken: "new-refresh",
+    };
+    let userId: number | null = null;
+
+    try {
+      const user = await prisma.user.create({ data: { email: `history-token-${suffix}@example.test`, passwordHash: "not-a-login-password", role: "USER", status: "ACTIVE", emailVerifiedAt: new Date() } });
+      userId = user.id;
+      const connection = await prisma.energyConnection.create({
+        data: {
+          userId: user.id,
+          provider: "LEGACY_SPOTTEX",
+          encryptedAccessToken: encryptSecret(oldTokens.accessToken),
+          encryptedRefreshToken: encryptSecret(oldTokens.refreshToken),
+        },
+      });
+      const client = {
+        fetchHistoricalIntervals: vi.fn().mockRejectedValue(new Error("history cache pending")),
+        getTokens: vi.fn().mockReturnValue(newTokens),
+      };
+      await expect(
+        fetchHistoryWithDurableTokens(
+          connection,
+          oldTokens,
+          client,
+          "device-1",
+          new Date("2026-01-01T00:00:00.000Z"),
+          new Date("2026-01-02T00:00:00.000Z"),
+        ),
+      ).rejects.toThrow("history cache pending");
+      const stored = await prisma.energyConnection.findUniqueOrThrow({ where: { id: connection.id } });
+      expect(decryptSecret(stored.encryptedAccessToken!)).toBe(newTokens.accessToken);
+      expect(decryptSecret(stored.encryptedRefreshToken!)).toBe(newTokens.refreshToken);
+      expect(stored.tokenExpiresAt?.toISOString()).toBe("2033-05-18T03:33:20.000Z");
+    } finally {
+      if (userId !== null) await prisma.user.delete({ where: { id: userId } });
+      if (previousEncryptionKey === undefined) delete process.env.APP_ENCRYPTION_KEY;
+      else process.env.APP_ENCRYPTION_KEY = previousEncryptionKey;
     }
   });
 });
