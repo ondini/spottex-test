@@ -5,6 +5,11 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
 
+import {
+  findCatalogValue,
+  latestCatalogActivity,
+  normalizeCatalogKey,
+} from "./catalog-contract";
 import { configuredCostsBaseUrl } from "./client";
 
 const specValueSchema = z.object({
@@ -63,9 +68,14 @@ function object(value: unknown): Record<string, unknown> {
 function identityValue(metadata: unknown, keys: string[]) {
   const identity = object(metadata).identity;
   if (!Array.isArray(identity)) return null;
+  const accepted = new Set(keys.map(normalizeCatalogKey));
   for (const row of identity) {
     const entry = object(row);
-    if (typeof entry.key === "string" && keys.includes(entry.key) && typeof entry.value === "string") {
+    if (
+      typeof entry.key === "string" &&
+      accepted.has(normalizeCatalogKey(entry.key)) &&
+      typeof entry.value === "string"
+    ) {
       return entry.value.trim();
     }
   }
@@ -73,7 +83,10 @@ function identityValue(metadata: unknown, keys: string[]) {
 }
 
 function spec(values: Spec[], keys: string[]) {
-  return values.find((value) => keys.includes(value.key) && value.analysisAllowed !== false);
+  return findCatalogValue(
+    values.filter((value) => value.analysisAllowed !== false),
+    keys,
+  );
 }
 
 function textField(values: Spec[], keys: string[]) {
@@ -190,13 +203,28 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
   if (!baseUrl || !apiKey) return { configured: false, status: "DISABLED", snapshotAsOf: null, received: 0, importedDrafts: 0, skippedIncomplete: 0 };
   const now = options?.now ?? new Date();
   const intervalMinutes = Math.max(30, Number(process.env.COSTS_CATALOG_SYNC_INTERVAL_MINUTES ?? 360));
-  const lastImport = await prisma.catalogSourceDocument.findFirst({
-    where: { kind: { in: ["COSTS_ENERGY_SUPPLY", "COSTS_ENERGY_DISTRIBUTION"] } },
-    orderBy: { updatedAt: "desc" },
-    select: { updatedAt: true },
-  });
-  if (!options?.force && lastImport && now.getTime() - lastImport.updatedAt.getTime() < intervalMinutes * 60_000) {
-    return { configured: true, status: "SKIPPED", snapshotAsOf: lastImport.updatedAt.toISOString(), received: 0, importedDrafts: 0, skippedIncomplete: 0 };
+  const [lastImport, lastAttempt] = await Promise.all([
+    prisma.catalogSourceDocument.findFirst({
+      where: { kind: { in: ["COSTS_ENERGY_SUPPLY", "COSTS_ENERGY_DISTRIBUTION"] } },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    }),
+    prisma.auditLog.findFirst({
+      where: { action: "COSTS_VERIFIED_ENERGY_CATALOG_SYNCED" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const lastActivityAt = latestCatalogActivity(
+    lastImport?.updatedAt,
+    lastAttempt?.createdAt,
+  );
+  if (
+    !options?.force &&
+    lastActivityAt &&
+    now.getTime() - lastActivityAt.getTime() < intervalMinutes * 60_000
+  ) {
+    return { configured: true, status: "SKIPPED", snapshotAsOf: lastActivityAt.toISOString(), received: 0, importedDrafts: 0, skippedIncomplete: 0 };
   }
 
   const [supply, distribution] = await Promise.all([
