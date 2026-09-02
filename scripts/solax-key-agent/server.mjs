@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createEngine } from "./engine.mjs";
-import { invokeCodexRepair, runExtractorScript } from "./runner.mjs";
+import { discover, runExtraction } from "./runner.mjs";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.SOLAX_KEY_AGENT_PORT ?? 3011);
@@ -16,13 +16,12 @@ const stateDir = process.env.SOLAX_KEY_AGENT_STATE_DIR ?? "/data/extractor";
 const portalUrl =
   process.env.SOLAX_KEY_AGENT_PORTAL_URL ?? "https://global.solaxcloud.com/user-center/";
 const extractionTimeoutMs = Number(process.env.SOLAX_KEY_AGENT_TIMEOUT_MS ?? 180_000);
-const repairAttempts = Number(process.env.SOLAX_KEY_AGENT_REPAIR_ATTEMPTS ?? 2);
 const codexTimeoutMs = Number(process.env.SOLAX_KEY_AGENT_CODEX_TIMEOUT_MS ?? 480_000);
 let active = false;
 
 // Same reasoning as the invoice parser: this endpoint accepts portal
-// credentials and can burn Codex credit, so the moment it listens anywhere
-// beyond loopback a strong token is mandatory.
+// credentials and can burn Codex credit, so the moment it listens beyond
+// loopback a strong token is mandatory.
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const requiresToken = !LOOPBACK.has(bindAddress);
 if (requiresToken && token.length < 32) {
@@ -45,31 +44,33 @@ function tokenAccepted(header) {
 
 const engine = createEngine({
   stateDir,
-  defaultScriptPath: path.join(directory, "extractor.default.mjs"),
-  portalUrl,
-  maxRepairAttempts: repairAttempts,
+  defaultLocatorPath: path.join(directory, "locator.default.mjs"),
   log: (line) => console.log(`[engine] ${line}`),
-  // Artifacts live in tmpfs: the repair step copies what it needs into its
-  // own workdir, so leftover directories vanish with the container.
-  runScript: async (scriptPath, credentials) => {
-    const artifactsDir = await mkdtemp(path.join(os.tmpdir(), "solax-key-artifacts-"));
-    return runExtractorScript({
-      scriptPath,
+  // Try the current locator against one fresh authenticated session.
+  runLocator: async (locatorPath, credentials) => {
+    const artifactsDir = await mkdtemp(path.join(os.tmpdir(), "solax-key-run-"));
+    return runExtraction({
+      locatorPath,
       credentials,
       portalUrl,
       artifactsDir,
       timeoutMs: extractionTimeoutMs,
     });
   },
-  invokeRepair: ({ currentScript, artifacts, error }) =>
-    invokeCodexRepair({
-      currentScript,
-      artifacts,
-      error,
-      promptPath: path.join(directory, "repair-prompt.md"),
-      schemaPath: path.join(directory, "repair-output.schema.json"),
-      timeoutMs: codexTimeoutMs,
-    }),
+  // On failure, log in once, explore, author a locator and validate it.
+  discover: async (credentials, failedLocatorPath) => {
+    const artifactsDir = await mkdtemp(path.join(os.tmpdir(), "solax-key-discover-"));
+    return discover({
+      credentials,
+      portalUrl,
+      artifactsDir,
+      failedLocatorPath,
+      promptPath: path.join(directory, "discover-prompt.md"),
+      schemaPath: path.join(directory, "discover-output.schema.json"),
+      timeoutMs: extractionTimeoutMs,
+      codexTimeoutMs,
+    });
+  },
 });
 
 const server = http.createServer((request, response) => {
@@ -118,7 +119,7 @@ const server = http.createServer((request, response) => {
       const result = await engine.extract({ email, password });
       console.log(
         `extraction ok (account len=${email.length}, token len=${result.tokenId.length}, ` +
-          `script=${result.scriptVersion}, repaired=${result.repaired})`,
+          `script=${result.scriptVersion}, discovered=${result.discovered})`,
       );
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify(result));

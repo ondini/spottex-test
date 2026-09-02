@@ -5,9 +5,8 @@
     <title>Login</title>
   </head>
   <body>
-    <!-- Mini replica of the SolaX portal: exactly the selectors the default
-         extractor relies on, so the selftest exercises the real flow without
-         touching the internet. -->
+    <!-- Old portal layout: the seed locator (click div.logo-api, read the
+         tokenID: span) works directly here, so no discovery is needed. -->
     <div id="login">
       <input placeholder="Please enter your user name/email/mobile number" />
       <input placeholder="Enter Password" type="password" />
@@ -17,7 +16,7 @@
     <div id="portal" hidden>
       <div class="logo-api">API</div>
       <div id="apiPanel" hidden>
-        <span class="title">tokenID:</span><span class="value">FIXTURE1234567890TOKEN</span>
+        <span class="title">tokenID:</span><span class="value">OLDPORTALTOKEN1234567890</span>
       </div>
     </div>
     <script>
@@ -26,9 +25,7 @@
       let agreed = false;
       document
         .querySelector("#agreeMent .arco-checkbox-icon-hover")
-        .addEventListener("click", () => {
-          agreed = true;
-        });
+        .addEventListener("click", () => { agreed = true; });
       document.querySelector(".submit-button").addEventListener("click", () => {
         const [userInput, passwordInput] = document.querySelectorAll("input");
         if (!agreed || userInput.value !== EMAIL || passwordInput.value !== PASSWORD) return;

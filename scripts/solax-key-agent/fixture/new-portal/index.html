@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Login</title>
+  </head>
+  <body>
+    <!-- New portal layout: the old div.logo-api / tokenID: span is gone. The
+         header now has an "API" link that opens a separate developer page in a
+         NEW TAB, and the token lives there under a different structure. The
+         seed locator fails here, so the engine must explore and rediscover. -->
+    <div id="login">
+      <input placeholder="Please enter your user name/email/mobile number" />
+      <input placeholder="Enter Password" type="password" />
+      <div id="agreeMent"><span class="arco-checkbox-icon-hover">agree</span></div>
+      <button class="submit-button" type="button">Login</button>
+    </div>
+    <div id="portal" hidden>
+      <header class="top-bar">
+        <a class="hdr-api" href="developer.html" target="_blank" rel="noopener">API</a>
+        <a class="hdr-dashboard" href="#dashboard">Data Dashboard</a>
+      </header>
+      <nav class="side">
+        <a href="#overview" class="menu-item">Overview</a>
+        <a href="#devices" class="menu-item">Devices</a>
+      </nav>
+      <main>Plant overview — no API key shown on this page.</main>
+    </div>
+    <script>
+      const EMAIL = "fixture@example.com";
+      const PASSWORD = "fixture-pass";
+      let agreed = false;
+      document
+        .querySelector("#agreeMent .arco-checkbox-icon-hover")
+        .addEventListener("click", () => { agreed = true; });
+      document.querySelector(".submit-button").addEventListener("click", () => {
+        const [userInput, passwordInput] = document.querySelectorAll("input");
+        if (!agreed || userInput.value !== EMAIL || passwordInput.value !== PASSWORD) return;
+        document.querySelector("#login").hidden = true;
+        document.querySelector("#portal").hidden = false;
+        document.title = "Solax Cloud System";
+      });
+    </script>
+  </body>
+</html>

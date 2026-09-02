@@ -497,17 +497,31 @@ fungoval healthcheck.
 
 **SolaX key agent** (`scripts/solax-key-agent/`, profil `solax-key-agent`,
 port `3011`) sdílí stejná pravidla hostování i tokenu. Je to samoopravný
-extraktor účtového `tokenID` ze SolaX Cloud portálu: `POST /extract` s
-přihlašovacími údaji účtu spustí aktuální Playwright skript, a když portál
-změní UI a skript selže, agent předá Codexu screenshot, DOM a konzoli z
-místa selhání, nechá si napsat opravený skript, ověří ho živým během a až
-pak ho povýší na nový aktuální (historie verzí zůstává ve svazku stavu).
-Opravené skripty běží s přihlašovacími údaji portálu uvnitř tohoto
-izolovaného kontejneru — proto v něm kromě vlastního Codex přihlášení není
-žádný jiný secret. Mimo CI ho pokrývá `node scripts/solax-key-agent/selftest.mjs`
-(fixture portál + codex stub); logika opravné smyčky má jednotkové testy ve
-Vitestu. Zamýšlený volající je backendový `/sync_inverter` místo jeho
-vlastního Selenium scrapingu.
+extraktor účtového `tokenID` ze SolaX Cloud portálu. `POST /extract`
+s přihlašovacími údaji účtu vrátí `{tokenId, scriptVersion, discovered}`.
+
+Přihlášení do portálu je stabilní primitiv (`login.mjs`) a proběhne
+**jednou za session** — SolaX blokuje účty, které se přihlašují příliš
+často, takže se počet loginů drží co nejníž. Volatilní část („kde je klíč")
+je jen **lokátor po přihlášení** (`locator.default.mjs` → po první opravě
+`current.mjs` ve svazku stavu). Když portál změní UI a lokátor selže, agent
+v **téže přihlášené session** projde stránky (`explorer.mjs`: klikne na
+navigační prvky včetně nových záložek, sesbírá vykreslené řetězce vzhledu
+tokenu s jejich popisky, texty stránek a screenshoty), předá tento důkaz
+Codexu, nechá si napsat nový lokátor, ověří ho živým během ve stejné session
+a teprve pak ho povýší (předchozí verze se archivují). Appka tokenID po
+dešifrování vykreslí do DOMu, takže průzkum, který dojde na správnou
+stránku, ho vidí — starý skript hledal jen na špatné stránce.
+
+Lokátory běží s přihlašovacími údaji portálu uvnitř tohoto izolovaného
+kontejneru — proto v něm kromě vlastního Codex přihlášení není žádný jiný
+secret. Logika enginu (povýšení/archivace, spuštění průzkumu při selhání) má
+jednotkové testy ve Vitestu; celý průzkumný cyklus pokrývá mimo CI
+`node scripts/solax-key-agent/selftest.mjs` proti dvěma fixture portálům
+(starý = lokátor projde přímo; nový = klíč přesunutý do jiné záložky, seed
+selže a průzkum ho musí najít) s codex stubem místo živého Codexu. Zamýšlený
+volající je backendový `/sync_inverter` místo jeho vlastního Selenium
+scrapingu; pro nové elektrálny bez klíče ho lze volat dávkově.
 
 Žádný compose soubor se nepřipojuje k Docker síti jiného projektu. To by
 fungovalo jen na stroji, kde náhodou běží všechno pohromadě.

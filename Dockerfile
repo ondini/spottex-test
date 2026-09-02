@@ -79,8 +79,9 @@ RUN apt-get update \
   && chmod 700 /data/codex \
   && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY scripts/solax-key-agent/server.mjs scripts/solax-key-agent/engine.mjs \
-  scripts/solax-key-agent/runner.mjs scripts/solax-key-agent/extractor.default.mjs \
-  scripts/solax-key-agent/repair-prompt.md scripts/solax-key-agent/repair-output.schema.json ./
+  scripts/solax-key-agent/runner.mjs scripts/solax-key-agent/explorer.mjs \
+  scripts/solax-key-agent/login.mjs scripts/solax-key-agent/locator.default.mjs \
+  scripts/solax-key-agent/discover-prompt.md scripts/solax-key-agent/discover-output.schema.json ./
 ENV CODEX_HOME=/data/codex
 ENV CODEX_SEED_AUTH_FILE=/run/codex-seed/auth.json
 USER 1001:1001

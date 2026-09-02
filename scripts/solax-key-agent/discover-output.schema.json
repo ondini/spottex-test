@@ -5,11 +5,11 @@
   "properties": {
     "script": {
       "type": "string",
-      "description": "Complete replacement extractor script (ESM, default export per the contract)."
+      "description": "Complete locator script (ESM, default export async ({page, context, log}) => tokenId)."
     },
     "notes": {
       "type": "string",
-      "description": "One sentence on what changed and why."
+      "description": "One sentence naming the page and element targeted and why."
     }
   }
 }

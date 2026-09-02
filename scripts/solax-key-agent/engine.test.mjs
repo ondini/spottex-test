@@ -4,106 +4,98 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { ExtractionError, createEngine } from "./engine.mjs";
+import { createEngine } from "./engine.mjs";
 
 const CREDENTIALS = { email: "user@example.com", password: "secret" };
+const GOOD_LOCATOR = `export default async () => "TOKEN-1234567890";\n// ${"x".repeat(60)}\n`;
 
 let stateDir;
-let defaultScriptPath;
+let defaultLocatorPath;
 
 beforeEach(async () => {
   stateDir = await mkdtemp(path.join(os.tmpdir(), "solax-engine-test-"));
-  defaultScriptPath = path.join(stateDir, "default.mjs");
-  await writeFile(defaultScriptPath, "export default async () => \"DEFAULT-SCRIPT-BODY\";\n");
+  defaultLocatorPath = path.join(stateDir, "default.mjs");
+  await writeFile(defaultLocatorPath, "export default async () => \"SEED-LOCATOR-BODY\";\n");
 });
 
 describe("createEngine", () => {
-  it("seeds current.mjs from the default script and returns its token", async () => {
+  it("seeds current.mjs from the default locator and returns its token", async () => {
     const engine = createEngine({
       stateDir,
-      defaultScriptPath,
-      runScript: async (scriptPath) => {
-        expect(path.basename(scriptPath)).toBe("current.mjs");
+      defaultLocatorPath,
+      runLocator: async (locatorPath) => {
+        expect(path.basename(locatorPath)).toBe("current.mjs");
         return { tokenId: "TOKEN-1234567890" };
       },
     });
     const result = await engine.extract(CREDENTIALS);
-    expect(result.tokenId).toBe("TOKEN-1234567890");
-    expect(result.repaired).toBe(false);
+    expect(result).toMatchObject({ tokenId: "TOKEN-1234567890", discovered: false });
     expect(result.scriptVersion).toMatch(/^[0-9a-f]{8}$/);
-    const seeded = await readFile(path.join(stateDir, "current.mjs"), "utf8");
-    expect(seeded).toContain("DEFAULT-SCRIPT-BODY");
+    expect(await readFile(path.join(stateDir, "current.mjs"), "utf8")).toContain("SEED-LOCATOR-BODY");
   });
 
-  it("repairs, validates and promotes a candidate when the current script fails", async () => {
-    const repairedBody = `export default async () => "REPAIRED";\n// ${"x".repeat(60)}\n`;
-    let repairCalls = 0;
+  it("runs discovery and promotes the new locator when the current one fails", async () => {
+    let discoverCalls = 0;
     const engine = createEngine({
       stateDir,
-      defaultScriptPath,
-      maxRepairAttempts: 2,
-      runScript: async (scriptPath) => {
-        const content = await readFile(scriptPath, "utf8");
-        if (content.includes("REPAIRED")) return { tokenId: "TOKEN-AFTER-REPAIR" };
-        throw new ExtractionError("selector timeout", { htmlPath: "/tmp/none" });
+      defaultLocatorPath,
+      runLocator: async () => {
+        throw new Error("logo-api not found");
       },
-      invokeRepair: async ({ currentScript, error }) => {
-        repairCalls += 1;
-        expect(currentScript).toContain("DEFAULT-SCRIPT-BODY");
-        expect(error).toContain("selector timeout");
-        return { script: repairedBody };
+      discover: async (credentials, failedLocatorPath) => {
+        discoverCalls += 1;
+        expect(credentials).toEqual(CREDENTIALS);
+        expect(path.basename(failedLocatorPath)).toBe("current.mjs");
+        return { script: GOOD_LOCATOR, tokenId: "TOKEN-AFTER-DISCOVERY" };
       },
     });
     const result = await engine.extract(CREDENTIALS);
-    expect(result).toMatchObject({ tokenId: "TOKEN-AFTER-REPAIR", repaired: true });
-    expect(repairCalls).toBe(1);
+    expect(result).toMatchObject({ tokenId: "TOKEN-AFTER-DISCOVERY", discovered: true });
+    expect(discoverCalls).toBe(1);
     const current = await readFile(path.join(stateDir, "current.mjs"), "utf8");
-    expect(current).toContain("REPAIRED");
+    expect(current).toContain("TOKEN-1234567890");
+    // The superseded seed locator is archived, not lost.
     const archived = await readdir(path.join(stateDir, "history"));
     expect(archived).toHaveLength(1);
   });
 
-  it("gives up after maxRepairAttempts and rethrows the last error", async () => {
-    let repairCalls = 0;
+  it("rejects a discovery result whose script is too short to be real", async () => {
     const engine = createEngine({
       stateDir,
-      defaultScriptPath,
-      maxRepairAttempts: 2,
-      runScript: async () => {
-        throw new ExtractionError("still broken");
+      defaultLocatorPath,
+      runLocator: async () => {
+        throw new Error("broken");
       },
-      invokeRepair: async () => {
-        repairCalls += 1;
-        return { script: `export default async () => { throw new Error("no"); };\n// pad ${"y".repeat(40)}` };
-      },
+      discover: async () => ({ script: "nope", tokenId: "TOKEN-1234567890" }),
     });
-    await expect(engine.extract(CREDENTIALS)).rejects.toThrow("still broken");
-    expect(repairCalls).toBe(2);
-    const current = await readFile(path.join(stateDir, "current.mjs"), "utf8");
-    expect(current).toContain("DEFAULT-SCRIPT-BODY");
+    await expect(engine.extract(CREDENTIALS)).rejects.toThrow("DISCOVERY_RETURNED_INVALID_RESULT");
   });
 
-  it("rejects repair output that is too short to be a script", async () => {
+  it("propagates the locator failure when no discover function is configured", async () => {
     const engine = createEngine({
       stateDir,
-      defaultScriptPath,
-      maxRepairAttempts: 1,
-      runScript: async () => {
-        throw new ExtractionError("broken");
+      defaultLocatorPath,
+      runLocator: async () => {
+        throw new Error("no discovery configured");
       },
-      invokeRepair: async () => ({ script: "short" }),
     });
-    await expect(engine.extract(CREDENTIALS)).rejects.toThrow("REPAIR_SCRIPT_INVALID");
+    await expect(engine.extract(CREDENTIALS)).rejects.toThrow("no discovery configured");
   });
 
-  it("propagates the failure without repair when invokeRepair is absent", async () => {
+  it("uses the promoted locator on the next run without discovering again", async () => {
+    await writeFile(path.join(stateDir, "current.mjs"), GOOD_LOCATOR);
+    let discoverCalls = 0;
     const engine = createEngine({
       stateDir,
-      defaultScriptPath,
-      runScript: async () => {
-        throw new ExtractionError("no repair configured");
+      defaultLocatorPath,
+      runLocator: async () => ({ tokenId: "TOKEN-PROMOTED" }),
+      discover: async () => {
+        discoverCalls += 1;
+        return { script: GOOD_LOCATOR, tokenId: "x" };
       },
     });
-    await expect(engine.extract(CREDENTIALS)).rejects.toThrow("no repair configured");
+    const result = await engine.extract(CREDENTIALS);
+    expect(result).toMatchObject({ tokenId: "TOKEN-PROMOTED", discovered: false });
+    expect(discoverCalls).toBe(0);
   });
 });
