@@ -407,8 +407,8 @@ function InvoiceReviewDialog({
             <ReviewField name="distributionTariffCode" value={values.distributionTariffCode} />
             <ReviewField name="phases" value={values.phases} type="number" />
             <ReviewField name="mainFuseA" value={values.mainFuseA} type="number" />
-            <ReviewSelect name="buyPricingMode" value={values.buyPricingMode} options={[["", "Neuvedeno"], ["FIX", "Fixní cena"], ["SPOT", "Spotová cena"], ["OTHER", "Jiný produkt"]]} />
-            <ReviewSelect name="sellPricingMode" value={values.sellPricingMode} options={[["", "Neuvedeno"], ["FIX", "Fixní výkup"], ["SPOT", "Spotový výkup"], ["OTHER", "Jiný produkt"]]} />
+            <ReviewSelect name="buyPricingMode" value={derivedPricingMode(values.buyPricingMode, values.fixedBuyPriceCzkKwh, values.spotBuyFeeCzkKwh)} options={[["", "Neuvedeno"], ["FIX", "Fixní cena"], ["SPOT", "Spotová cena"], ["OTHER", "Jiný produkt"]]} />
+            <ReviewSelect name="sellPricingMode" value={derivedPricingMode(values.sellPricingMode, values.fixedSellPriceCzkKwh, values.spotSellFeeCzkKwh)} options={[["", "Neuvedeno"], ["FIX", "Fixní výkup"], ["SPOT", "Spotový výkup"], ["OTHER", "Jiný produkt"]]} />
             <ReviewField name="currentSupplierName" value={values.currentSupplierName} />
             <ReviewField name="currentProductName" value={values.currentProductName} />
             <ReviewField name="monthlySupplierFeeCzk" value={values.monthlySupplierFeeCzk} type="number" />
@@ -451,6 +451,16 @@ function InvoiceReviewDialog({
       </div>
     </div>
   );
+}
+
+// The save handler skips empty form values, so an unset mode select would let a
+// stale profile mode outlive a parsed fixed price or spot fee. Preselect the mode
+// implied by the parsed prices; the human still confirms it in the dialog.
+function derivedPricingMode(mode: InvoiceValue | undefined, fixedPrice: InvoiceValue | undefined, spotFee: InvoiceValue | undefined): InvoiceValue {
+  if (mode != null && mode !== "") return mode;
+  if (fixedPrice != null && fixedPrice !== "") return "FIX";
+  if (spotFee != null && spotFee !== "") return "SPOT";
+  return null;
 }
 
 function ReviewField({ name, value, type = "text", wide = false }: { name: string; value: InvoiceValue | undefined; type?: string; wide?: boolean }) {

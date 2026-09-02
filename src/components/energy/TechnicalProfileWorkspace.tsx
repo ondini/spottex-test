@@ -98,12 +98,17 @@ const sourceLabels: Record<Source, string> = {
 };
 
 const fieldLabels: Record<string, string> = {
+  ean: "EAN",
   pvCapacityKwp: "výkon FVE",
   distributorCode: "distributor",
   distributionTariffCode: "distribuční sazba",
+  phases: "počet fází",
   mainFuseA: "hlavní jistič",
   buyPricingMode: "nákupní produkt",
   sellPricingMode: "výkupní produkt",
+  currentSupplierName: "současný dodavatel",
+  currentProductName: "název produktu",
+  monthlySupplierFeeCzk: "stálý plat dodavateli",
   maxGridInputKw: "maximální odběr",
   maxGridOutputKw: "maximální přetok",
   batteryCapacityKwh: "kapacita baterie",
@@ -112,6 +117,11 @@ const fieldLabels: Record<string, string> = {
   batteryMinSocPct: "minimální SoC",
   batteryMaxSocPct: "maximální SoC",
   exportAllowed: "povolení přetoků",
+  fixedBuyPriceCzkKwh: "fixní cena za odběr",
+  fixedSellPriceCzkKwh: "fixní výkupní cena",
+  spotBuyFeeCzkKwh: "poplatek za spotový nákup",
+  spotSellFeeCzkKwh: "poplatek za spotový výkup",
+  fixedPriceValidUntil: "platnost fixní ceny",
 };
 
 function numberValue(value: FormDataEntryValue | null): number | null {
@@ -288,11 +298,11 @@ export function TechnicalProfileWorkspace({ initialWorkspace }: { initialWorkspa
           <SelectField name="buyPricingMode" label="Nákup elektřiny" value={values.buyPricingMode || ""} evidence={profile.evidence.buyPricingMode} options={[["", "Nevíme"], ["FIX", "FIX"], ["SPOT", "SPOT"], ["OTHER", "Jiný produkt"]]} />
           <SelectField name="sellPricingMode" label="Výkup elektřiny" value={values.sellPricingMode || ""} evidence={profile.evidence.sellPricingMode} options={[["", "Nevíme"], ["FIX", "FIX"], ["SPOT", "SPOT"], ["OTHER", "Jiný produkt"]]} />
           <NumberField name="monthlySupplierFeeCzk" label="Stálý plat dodavateli vč. DPH" value={values.monthlySupplierFeeCzk} evidence={profile.evidence.monthlySupplierFeeCzk} unit="Kč/měsíc" />
-          <NumberField name="fixedBuyPriceCzkKwh" label="Fixní cena silové elektřiny vč. DPH" value={values.fixedBuyPriceCzkKwh} evidence={profile.evidence.fixedBuyPriceCzkKwh} unit="Kč/kWh" />
-          <NumberField name="fixedSellPriceCzkKwh" label="Fixní výkupní cena vč. DPH" value={values.fixedSellPriceCzkKwh} evidence={profile.evidence.fixedSellPriceCzkKwh} unit="Kč/kWh" />
-          <NumberField name="spotBuyFeeCzkKwh" label="Poplatek za spotový nákup" value={values.spotBuyFeeCzkKwh} evidence={profile.evidence.spotBuyFeeCzkKwh} unit="Kč/kWh" />
-          <NumberField name="spotSellFeeCzkKwh" label="Poplatek za spotový výkup" value={values.spotSellFeeCzkKwh} evidence={profile.evidence.spotSellFeeCzkKwh} unit="Kč/kWh" />
-          <TextField name="fixedPriceValidUntil" type="date" label="Fixní cena platí do" value={values.fixedPriceValidUntil?.slice(0, 10) ?? null} evidence={profile.evidence.fixedPriceValidUntil} />
+          <NumberField name="fixedBuyPriceCzkKwh" label="Fixní cena silové elektřiny vč. DPH" value={values.fixedBuyPriceCzkKwh} evidence={profile.evidence.fixedBuyPriceCzkKwh} unit="Kč/kWh" relevant={values.buyPricingMode === "FIX"} />
+          <NumberField name="fixedSellPriceCzkKwh" label="Fixní výkupní cena vč. DPH" value={values.fixedSellPriceCzkKwh} evidence={profile.evidence.fixedSellPriceCzkKwh} unit="Kč/kWh" relevant={values.sellPricingMode === "FIX"} />
+          <NumberField name="spotBuyFeeCzkKwh" label="Poplatek za spotový nákup" value={values.spotBuyFeeCzkKwh} evidence={profile.evidence.spotBuyFeeCzkKwh} unit="Kč/kWh" relevant={values.buyPricingMode === "SPOT"} />
+          <NumberField name="spotSellFeeCzkKwh" label="Poplatek za spotový výkup" value={values.spotSellFeeCzkKwh} evidence={profile.evidence.spotSellFeeCzkKwh} unit="Kč/kWh" relevant={values.sellPricingMode === "SPOT"} />
+          <TextField name="fixedPriceValidUntil" type="date" label="Fixní cena platí do" value={values.fixedPriceValidUntil?.slice(0, 10) ?? null} evidence={profile.evidence.fixedPriceValidUntil} relevant={values.buyPricingMode === "FIX" || values.sellPricingMode === "FIX"} />
         </ProfileSection>
 
         <ProfileSection title="FVE a baterie" description="Technické limity načtené ze střídače; modelové hodnoty můžete zpřesnit. Maximální přetok nepřebíráme z faktury.">
@@ -313,17 +323,20 @@ function ProfileSection({ title, description, children }: { title: string; descr
   return <section className="app-card p-5 sm:p-6"><h2 className="font-semibold text-slate-900">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p><div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div></section>;
 }
 
-function EvidenceHint({ evidence }: { evidence?: Evidence[string] }) {
-  if (!evidence) return <span className="text-[11px] text-amber-600">nezadaný údaj</span>;
+function EvidenceHint({ evidence, relevant = true }: { evidence?: Evidence[string]; relevant?: boolean }) {
+  if (!evidence) {
+    if (!relevant) return <span className="text-[11px] text-slate-400">pro zvolený tarif se nepoužívá</span>;
+    return <span className="text-[11px] text-amber-600">nezadaný údaj</span>;
+  }
   return <span className="text-[11px] text-slate-400">Zdroj: {sourceLabels[evidence.source]}{evidence.confirmedAt ? " · potvrzeno" : ""}</span>;
 }
 
-function TextField({ name, label, value, evidence, placeholder, wide = false, type = "text" }: { name: string; label: string; value: string | null; evidence?: Evidence[string]; placeholder?: string; wide?: boolean; type?: string }) {
-  return <label className={`text-sm font-medium text-slate-700 ${wide ? "sm:col-span-2" : ""}`}>{label}<input className="app-input mt-1.5" type={type} name={name} defaultValue={value ?? ""} placeholder={placeholder} /><EvidenceHint evidence={evidence} /></label>;
+function TextField({ name, label, value, evidence, placeholder, wide = false, type = "text", relevant = true }: { name: string; label: string; value: string | null; evidence?: Evidence[string]; placeholder?: string; wide?: boolean; type?: string; relevant?: boolean }) {
+  return <label className={`text-sm font-medium text-slate-700 ${wide ? "sm:col-span-2" : ""}`}>{label}<input className="app-input mt-1.5" type={type} name={name} defaultValue={value ?? ""} placeholder={placeholder} /><EvidenceHint evidence={evidence} relevant={relevant} /></label>;
 }
 
-function NumberField({ name, label, value, evidence, unit, step = "0.01" }: { name: string; label: string; value: number | null; evidence?: Evidence[string]; unit?: string; step?: string }) {
-  return <label className="text-sm font-medium text-slate-700">{label}<span className="relative mt-1.5 block"><input className="app-input pr-20" inputMode="decimal" type="number" step={step} name={name} defaultValue={value ?? ""} />{unit && <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">{unit}</span>}</span><EvidenceHint evidence={evidence} /></label>;
+function NumberField({ name, label, value, evidence, unit, step = "0.01", relevant = true }: { name: string; label: string; value: number | null; evidence?: Evidence[string]; unit?: string; step?: string; relevant?: boolean }) {
+  return <label className="text-sm font-medium text-slate-700">{label}<span className="relative mt-1.5 block"><input className="app-input pr-20" inputMode="decimal" type="number" step={step} name={name} defaultValue={value ?? ""} />{unit && <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">{unit}</span>}</span><EvidenceHint evidence={evidence} relevant={relevant} /></label>;
 }
 
 function SelectField({ name, label, value, evidence, options }: { name: string; label: string; value: string; evidence?: Evidence[string]; options: Array<[string, string]> }) {

@@ -9,7 +9,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { supersedeSiteAnalyses } from "@/lib/analysis/invalidation";
 import { prisma } from "@/lib/prisma";
 
-import { invalidateEnergyDataQualityCache } from "./data-quality";
+import { getEnergyDataQuality, invalidateEnergyDataQualityCache } from "./data-quality";
 import { accessTokenExpiresAt, LegacySpottexClient } from "./legacy-client";
 import { upsertMeasuredIntervalsBulk } from "./interval-write";
 import { EnergyError, type LegacyTokenSet } from "./types";
@@ -389,4 +389,80 @@ export async function latestHistoryImport(userId: number, siteId: number) {
   const site = await prisma.energySite.findFirst({ where: { id: siteId, userId }, select: { id: true } });
   if (!site) throw new EnergyError("SITE_NOT_FOUND", "Elektrárna nebyla nalezena.", 404);
   return prisma.energyHistoryImport.findFirst({ where: { energySiteId: siteId }, orderBy: { createdAt: "desc" } });
+}
+
+const SPARSE_REQUEUE_MIN_AGE_MS = 24 * 60 * 60_000;
+// Mirrors the 75% coverage threshold `readyForEstimate` requires in data-quality.
+const SPARSE_REQUEUE_COVERAGE_PERCENT = 75;
+const SPARSE_REQUEUE_LIMIT = 3;
+const SPARSE_REQUEUE_SCAN_LIMIT = 10;
+
+export function shouldRequeueSparseHistoryImport(input: {
+  now: Date;
+  latestImportCreatedAt: Date;
+  batchStatuses: string[];
+  coveragePercent: number;
+  coverageDays: number;
+}) {
+  return (
+    input.now.getTime() - input.latestImportCreatedAt.getTime() >= SPARSE_REQUEUE_MIN_AGE_MS &&
+    input.batchStatuses.length > 0 &&
+    // CANCELED is deliberately not requeued: someone stopped that batch.
+    input.batchStatuses.every((status) => ["COMPLETED", "PARTIAL", "FAILED"].includes(status)) &&
+    input.coverageDays >= 1 &&
+    input.coveragePercent < SPARSE_REQUEUE_COVERAGE_PERCENT
+  );
+}
+
+/**
+ * The backend keeps backfilling its own SolaX store for days after a plant
+ * connects, so an import that finished sparse can succeed later. Re-request it
+ * daily instead of waiting for the user to trigger it by hand.
+ */
+export async function requeueSparseHistoryImports(now = new Date()) {
+  const staleBefore = new Date(now.getTime() - SPARSE_REQUEUE_MIN_AGE_MS);
+  const sites = await prisma.energySite.findMany({
+    where: {
+      provider: EnergyProvider.LEGACY_SPOTTEX,
+      historyImports: {
+        some: {},
+        none: { OR: [{ status: { in: ["QUEUED", "RUNNING"] } }, { createdAt: { gt: staleBefore } }] },
+      },
+    },
+    select: { id: true, userId: true },
+    orderBy: { id: "asc" },
+    take: SPARSE_REQUEUE_SCAN_LIMIT,
+  });
+  let checked = 0;
+  let requeued = 0;
+  for (const site of sites) {
+    if (requeued >= SPARSE_REQUEUE_LIMIT) break;
+    checked += 1;
+    try {
+      const latest = await prisma.energyHistoryImport.findFirst({
+        where: { energySiteId: site.id },
+        orderBy: { createdAt: "desc" },
+        select: { requestedFrom: true, requestedTo: true, createdAt: true },
+      });
+      if (!latest) continue;
+      const batch = await prisma.energyHistoryImport.findMany({
+        where: { energySiteId: site.id, requestedFrom: latest.requestedFrom, requestedTo: latest.requestedTo },
+        select: { status: true },
+      });
+      const quality = await getEnergyDataQuality(site.userId, site.id);
+      const eligible = shouldRequeueSparseHistoryImport({
+        now,
+        latestImportCreatedAt: latest.createdAt,
+        batchStatuses: batch.map((item) => item.status),
+        coveragePercent: quality.coveragePercent,
+        coverageDays: quality.coverageDays,
+      });
+      if (!eligible) continue;
+      await requestHistoryImport(site.userId, site.id);
+      requeued += 1;
+    } catch {
+      // One site's failed check or requeue must not block the remaining sites.
+    }
+  }
+  return { checked, requeued };
 }
