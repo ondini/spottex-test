@@ -11,7 +11,7 @@ const config = defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "scripts/solax-key-agent/**/*.test.mjs"],
     clearMocks: true,
     restoreMocks: true,
     unstubEnvs: true,

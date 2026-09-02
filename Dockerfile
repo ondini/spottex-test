@@ -61,6 +61,33 @@ USER 1001:1001
 # refreshed token cannot invalidate the one the host CLI still holds.
 CMD ["sh", "-c", "if [ -r \"$CODEX_SEED_AUTH_FILE\" ] && [ ! -f \"$CODEX_HOME/auth.json\" ]; then cp \"$CODEX_SEED_AUTH_FILE\" \"$CODEX_HOME/auth.json\" && chmod 600 \"$CODEX_HOME/auth.json\"; fi; exec node parser-server.mjs"]
 
+FROM node:22-bookworm-slim AS solax-key-agent
+ARG CODEX_VERSION=0.146.0-alpha.9.2
+ARG CODEX_UID=1001
+# Browsers install as root into a fixed path the runtime user can read; the
+# playwright package itself is a local dependency of the workdir because ESM
+# import() does not resolve globally installed modules.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+WORKDIR /opt/solax-key-agent
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && npm install --global "@openai/codex@${CODEX_VERSION}" \
+  && npm install --no-save playwright@1.61.1 \
+  && npx playwright install --with-deps chromium \
+  && mkdir -p /data/codex /data/extractor \
+  && chown -R "${CODEX_UID}:${CODEX_UID}" /data \
+  && chmod 700 /data/codex \
+  && rm -rf /var/lib/apt/lists/* /root/.npm
+COPY scripts/solax-key-agent/server.mjs scripts/solax-key-agent/engine.mjs \
+  scripts/solax-key-agent/runner.mjs scripts/solax-key-agent/extractor.default.mjs \
+  scripts/solax-key-agent/repair-prompt.md scripts/solax-key-agent/repair-output.schema.json ./
+ENV CODEX_HOME=/data/codex
+ENV CODEX_SEED_AUTH_FILE=/run/codex-seed/auth.json
+USER 1001:1001
+# Same credential arrangement as the invoice parser: seed once from the
+# read-only original, then own a writable copy so token refreshes persist.
+CMD ["sh", "-c", "if [ -r \"$CODEX_SEED_AUTH_FILE\" ] && [ ! -f \"$CODEX_HOME/auth.json\" ]; then cp \"$CODEX_SEED_AUTH_FILE\" \"$CODEX_HOME/auth.json\" && chmod 600 \"$CODEX_HOME/auth.json\"; fi; exec node server.mjs"]
+
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production

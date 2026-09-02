@@ -146,6 +146,38 @@ services:
     mem_limit: 1g
     cpus: 1
 
+  # Self-healing SolaX tokenId extractor (Playwright + Codex repair loop).
+  # Runs beside the invoice parser on the host that owns the Codex credential;
+  # other machines reach it through SOLAX_KEY_AGENT_PUBLISH on the WireGuard
+  # address with the token. Empty token keeps it loopback-only.
+  solax-key-agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: solax-key-agent
+    restart: unless-stopped
+    user: "1001:1001"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SOLAX_KEY_AGENT_PORT: "3011"
+      SOLAX_KEY_AGENT_BIND: "0.0.0.0"
+      SOLAX_KEY_AGENT_TOKEN: ${SOLAX_KEY_AGENT_TOKEN:-}
+      SOLAX_KEY_AGENT_STATE_DIR: /data/extractor
+    ports:
+      - "${SOLAX_KEY_AGENT_PUBLISH:-127.0.0.1:3011}:3011"
+    volumes:
+      - ${CODEX_AUTH_FILE:?Set CODEX_AUTH_FILE in Secrets/spottex.development.env}:/run/codex-seed/auth.json:ro
+      - spottex_dev_solax_codex:/data/codex
+      - spottex_dev_solax_state:/data/extractor
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=256m,uid=1001,gid=1001,mode=0700
+    mem_limit: 2g
+    cpus: 2
+
   invoice-coordinator:
     build:
       context: ..
@@ -203,6 +235,9 @@ volumes:
   # The parser's own Codex session. Keeping it out of the image and off the
   # read-only root is what lets a refreshed token outlive a restart.
   spottex_dev_parser_codex:
+  spottex_dev_solax_codex:
+  # Promoted (LLM-repaired) extractor scripts live here across restarts.
+  spottex_dev_solax_state:
 
 networks:
   costs_data:

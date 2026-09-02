@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "required": ["script"],
+  "additionalProperties": false,
+  "properties": {
+    "script": {
+      "type": "string",
+      "description": "Complete replacement extractor script (ESM, default export per the contract)."
+    },
+    "notes": {
+      "type": "string",
+      "description": "One sentence on what changed and why."
+    }
+  }
+}

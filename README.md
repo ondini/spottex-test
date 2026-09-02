@@ -495,6 +495,20 @@ poslouchá jinde, nastupuje token — a obě strany **odmítnou naběhnout**, po
 chybí nebo je kratší než 32 znaků. `/health` zůstává bez autentizace, aby
 fungoval healthcheck.
 
+**SolaX key agent** (`scripts/solax-key-agent/`, profil `solax-key-agent`,
+port `3011`) sdílí stejná pravidla hostování i tokenu. Je to samoopravný
+extraktor účtového `tokenID` ze SolaX Cloud portálu: `POST /extract` s
+přihlašovacími údaji účtu spustí aktuální Playwright skript, a když portál
+změní UI a skript selže, agent předá Codexu screenshot, DOM a konzoli z
+místa selhání, nechá si napsat opravený skript, ověří ho živým během a až
+pak ho povýší na nový aktuální (historie verzí zůstává ve svazku stavu).
+Opravené skripty běží s přihlašovacími údaji portálu uvnitř tohoto
+izolovaného kontejneru — proto v něm kromě vlastního Codex přihlášení není
+žádný jiný secret. Mimo CI ho pokrývá `node scripts/solax-key-agent/selftest.mjs`
+(fixture portál + codex stub); logika opravné smyčky má jednotkové testy ve
+Vitestu. Zamýšlený volající je backendový `/sync_inverter` místo jeho
+vlastního Selenium scrapingu.
+
 Žádný compose soubor se nepřipojuje k Docker síti jiného projektu. To by
 fungovalo jen na stroji, kde náhodou běží všechno pohromadě.
 
