@@ -533,7 +533,9 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
     prisma.energySite.findFirst({ where: { id: energySiteId, userId }, include: { technicalProfile: true } }),
     getEnergyDataQuality(userId, energySiteId),
   ]);
-  if (!site?.technicalProfile || !quality.from || !quality.to) return { created: 0, skipped: 0, errors: ["PRICE_CURVE_SITE_DATA_MISSING"] };
+  // Missing measurements/profile are already surfaced as workspace blockers,
+  // so the early return reports no current-tariff error of its own.
+  if (!site?.technicalProfile || !quality.from || !quality.to) return { created: 0, skipped: 0, errors: ["PRICE_CURVE_SITE_DATA_MISSING"], currentTariffErrors: [] as string[] };
   const validFrom = new Date(quality.from);
   const dataValidTo = new Date(new Date(quality.to).getTime() + 15 * 60_000);
   const pricingAsOf = new Date();
@@ -555,11 +557,17 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  // The caller shows current-tariff failures to the customer, while catalog
+  // and fallback-curve failures stay internal, so the baseline is tracked
+  // separately from the combined error list.
+  const currentTariffErrors: string[] = [];
   try {
     await materializeCurrentBaselinePriceCurve({ actorUserId: userId, energySiteId, validFrom, validTo, pricingAsOf });
     created += 1;
   } catch (error) {
-    errors.push(error instanceof Error ? error.message : "PRICE_CURVE_CURRENT_BASELINE_FAILED");
+    const code = error instanceof Error ? error.message : "PRICE_CURVE_CURRENT_BASELINE_FAILED";
+    errors.push(code);
+    currentTariffErrors.push(code);
   }
   try {
     // Always resolve the exact current fallback fingerprint. Merely finding an
@@ -712,5 +720,5 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
       );
     }
   }
-  return { created, skipped, errors: [...new Set(errors)] };
+  return { created, skipped, errors: [...new Set(errors)], currentTariffErrors };
 }

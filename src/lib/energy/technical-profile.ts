@@ -428,10 +428,18 @@ function valueRecord(site: Awaited<ReturnType<typeof ownedSite>>) {
   };
 }
 
+// 0 CZK monthly fee and 0 % minimum SoC are legitimate recorded values (the
+// invoice parser deliberately stores 0), so only null/"" count as missing here.
+const ZERO_VALID_FIELDS: ReadonlySet<keyof ReturnType<typeof valueRecord>> = new Set([
+  "monthlySupplierFeeCzk",
+  "batteryMinSocPct",
+]);
+
 export function technicalReadiness(values: ReturnType<typeof valueRecord>) {
   const missing = (fields: readonly (keyof typeof values)[]) => fields.filter((field) => {
     const value = values[field];
-    return value === null || value === "" || (typeof value === "number" && value <= 0);
+    if (value === null || value === "") return true;
+    return typeof value === "number" && value <= 0 && !ZERO_VALID_FIELDS.has(field);
   });
   const analysisMissing = missing(["pvCapacityKwp"]);
   const analysisAssumptions = missing([

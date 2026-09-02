@@ -106,6 +106,60 @@ function terminalAnalysisMessage(code: string) {
   return "Analýzu nelze dokončit bez úplných naměřených dat a ověřených cen pro každý interval.";
 }
 
+// Codes thrown by the current-tariff curve build (materializeCurrentBaseline-
+// PriceCurve). Only stable codes are persisted with the run and only this
+// Czech mapping reaches the UI, so raw error text never leaks either way.
+const PRICE_CURVE_WARNING_FALLBACK_CODE = "PRICE_CURVE_CURRENT_BASELINE_FAILED";
+const PRICE_CURVE_WARNING_MESSAGES: Record<string, string> = {
+  PRICE_CURVE_SITE_PROFILE_MISSING:
+    "Vlastní tarif nelze sestavit: chybí technický profil elektrárny.",
+  PRICE_CURVE_BREAKER_MISSING:
+    "Vlastní tarif nelze sestavit: v profilu chybí počet fází nebo hodnota hlavního jističe.",
+  PRICE_CURVE_CURRENT_DISTRIBUTION_MISSING:
+    "Vlastní tarif nelze sestavit: v profilu chybí distribuční sazba.",
+  PRICE_CURVE_CURRENT_DISTRIBUTION_AMBIGUOUS:
+    "Vlastní tarif nelze sestavit: sazbu nabízí více distributorů, doplňte v profilu distributora.",
+  PRICE_CURVE_CURRENT_DISTRIBUTION_NOT_PUBLISHED:
+    "Vlastní tarif nelze sestavit: zadaná distribuční sazba není v publikovaném ceníku.",
+  PRICE_CURVE_CURRENT_PRODUCT_MISSING:
+    "Vlastní tarif nelze sestavit: v profilu chybí typ nákupu nebo výkupu.",
+  PRICE_CURVE_CURRENT_PRODUCT_UNSUPPORTED:
+    "Vlastní tarif nelze sestavit: nákup nebo výkup typu „Jiný produkt“ zatím neumíme nacenit.",
+  PRICE_CURVE_CURRENT_BUY_PRICE_MISSING:
+    "Vlastní tarif nelze sestavit: chybí fixní nákupní cena.",
+  PRICE_CURVE_CURRENT_SELL_PRICE_MISSING:
+    "Vlastní tarif nelze sestavit: chybí fixní výkupní cena.",
+  PRICE_CURVE_MARKET_SERIES_MISSING:
+    "Vlastní tarif nelze sestavit: nejsou publikované tržní ceny pro spotovou část.",
+  PRICE_CURVE_VAT_NOT_INCLUDED:
+    "Vlastní tarif nelze sestavit: publikovaný distribuční ceník není s DPH.",
+};
+
+export function sanitizePriceCurveWarningCodes(errors: string[]) {
+  return [
+    ...new Set(
+      errors.map((code) =>
+        /^[A-Z0-9_]{1,64}$/.test(code) ? code : PRICE_CURVE_WARNING_FALLBACK_CODE,
+      ),
+    ),
+  ];
+}
+
+export function priceCurveWarningMessages(codes: unknown) {
+  if (!Array.isArray(codes)) return [];
+  return [
+    ...new Set(
+      codes
+        .filter((code): code is string => typeof code === "string")
+        .map(
+          (code) =>
+            PRICE_CURVE_WARNING_MESSAGES[code] ??
+            "Vlastní tarif se nepodařilo připravit.",
+        ),
+    ),
+  ];
+}
+
 const hardwareSchema = z
   .object({
     batteryCapacityKwh: z.number().min(0).max(5_000),
@@ -530,6 +584,9 @@ export async function getAnalysisWorkspace(
         dataQuality,
         ready: blockers.length === 0,
         blockers,
+        priceCurveWarnings: priceCurveWarningMessages(
+          object(site.analysisRuns[0]?.assumptions ?? {}).priceCurveWarnings,
+        ),
         profileConfirmed: Boolean(profile),
         standardCatalogReady,
         currentHardware: {
@@ -889,7 +946,13 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
   const dataFrom = new Date(quality.from);
   const dataTo = new Date(new Date(quality.to).getTime() + 15 * 60_000);
   await ensureOteMarketCoverage(userId, dataFrom, dataTo);
-  await ensurePublishedCatalogCurvesForSite(userId, site.id);
+  const curveMaterialization = await ensurePublishedCatalogCurvesForSite(
+    userId,
+    site.id,
+  );
+  const priceCurveWarningCodes = sanitizePriceCurveWarningCodes(
+    curveMaterialization.currentTariffErrors,
+  );
   const allCurves = await prisma.energyPriceCurve.findMany({
     where: {
       energySiteId: site.id,
@@ -1288,6 +1351,7 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
           selectedPriceCurveIds: input.selectedPriceCurveIds,
         },
         assumptions: {
+          priceCurveWarnings: priceCurveWarningCodes,
           hdoByCurve: curves.map((curve) => ({
             id: curve.id,
             hdoCalendarId: curve.hdoCalendarId,

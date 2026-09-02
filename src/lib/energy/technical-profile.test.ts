@@ -80,6 +80,30 @@ describe("technical profile readiness", () => {
     ]));
   });
 
+  it("accepts a zero supplier fee and zero minimum SoC as real values", () => {
+    const result = technicalReadiness({
+      ...complete,
+      monthlySupplierFeeCzk: 0,
+      batteryMinSocPct: 0,
+    });
+    expect(result.analysisAssumptions).not.toContain("monthlySupplierFeeCzk");
+    expect(result.controlMissing).not.toContain("batteryMinSocPct");
+    expect(result.controlReady).toBe(true);
+  });
+
+  it("still reports null zero-valid fields and zero capacities as missing", () => {
+    const nulls = technicalReadiness({
+      ...complete,
+      monthlySupplierFeeCzk: null,
+      batteryMinSocPct: null,
+    });
+    expect(nulls.analysisAssumptions).toContain("monthlySupplierFeeCzk");
+    expect(nulls.controlMissing).toContain("batteryMinSocPct");
+    const zeroPv = technicalReadiness({ ...complete, pvCapacityKwp: 0 });
+    expect(zeroPv.analysisReady).toBe(false);
+    expect(zeroPv.analysisMissing).toContain("pvCapacityKwp");
+  });
+
   it("validates panel and future appliance constraints", () => {
     expect(technicalProfilePatchSchema.safeParse({
       pvArrays: [{ name: "Jih", panelCount: 22, panelRatedWp: 450, nominalDcCapacityKwp: 9.9, active: true }],

@@ -89,6 +89,7 @@ type Workspace = {
     } | null;
     ready: boolean;
     blockers: string[];
+    priceCurveWarnings: string[];
     profileConfirmed: boolean;
     standardCatalogReady: boolean;
     dataQuality: {
@@ -1147,6 +1148,18 @@ export function AnalysisWorkspace({
           ) : undefined
         }
       />
+      {!hasCurrentTariffScenario && site.priceCurveWarnings.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-sm font-semibold text-amber-950">
+            Scénář pro váš současný tarif zatím chybí
+          </p>
+          <ul className="mt-1 space-y-1 text-sm leading-6 text-amber-900">
+            {site.priceCurveWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <section className="app-card p-4 sm:p-5">
         {(pending || latestRunning) && (
           <div

@@ -21,7 +21,10 @@ import {
 } from "@/lib/commerce/payment";
 import { processSimulationJobs } from "@/lib/simulation/service";
 import { processRecurringRenewals } from "@/lib/commerce/recurring";
-import { processHistoryImportJobs } from "@/lib/energy/history-import";
+import {
+  processHistoryImportJobs,
+  requeueSparseHistoryImports,
+} from "@/lib/energy/history-import";
 import { monitorCatalogExpirations } from "@/lib/pricing/expiry-monitor";
 import { syncBackendMarketPrices } from "@/lib/pricing/backend-market-source";
 import { syncCostsEnergyCatalog } from "@/lib/costs/catalog-sync";
@@ -164,6 +167,8 @@ async function runJobs(lease: { id: string; owner: string }) {
   await heartbeatRunnerLease(lease);
   const historyImports = await processHistoryImportJobs({ limit: 3, onHeartbeat: () => heartbeatRunnerLease(lease) });
   await heartbeatRunnerLease(lease);
+  const historyRequeue = await requeueSparseHistoryImports();
+  await heartbeatRunnerLease(lease);
   const simulations = await processSimulationJobs({
     limit: 1,
     onHeartbeat: () => heartbeatRunnerLease(lease),
@@ -226,6 +231,7 @@ async function runJobs(lease: { id: string; owner: string }) {
     marketSync,
     costsCatalogSync,
     historyImports,
+    historyRequeue,
     simulations,
     catalogExpirations,
     email,
