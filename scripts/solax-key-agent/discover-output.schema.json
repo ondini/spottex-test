@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "required": ["script"],
+  "required": ["script", "notes"],
   "additionalProperties": false,
   "properties": {
     "script": {
