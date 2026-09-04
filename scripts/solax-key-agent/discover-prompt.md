@@ -24,7 +24,11 @@ DOM, so it is readable from a page once you navigate to the right one.
     `pageUrl`, `pageTitle`, `context`, and `labelled` (true when the surrounding
     text mentions token/API/key).
 - `<screenshot>.png` files referenced by the pages (one is attached as an image).
-- `failed-locator.mjs` — the locator that just failed, for reference.
+- `failed-locator.mjs` — the locator that just failed (on a retry this is your
+  previous attempt), for reference.
+- `error.txt` — why that locator failed (e.g. a selector timed out). On a retry,
+  read it carefully and change your approach: a different navigation path or a
+  more robust selector, not a superficial tweak of the same failing one.
 
 Prefer a candidate whose `labelled` is true and whose `context` mentions
 tokenID/API. If several look plausible, pick the one on the page whose title or

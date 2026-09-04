@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -105,8 +105,34 @@ export async function runExtraction({ locatorPath, credentials, portalUrl, artif
   );
 }
 
-// One login, then: explore -> let codex author a locator from the evidence ->
-// validate that locator in the SAME session -> return the working script.
+// Copy the evidence and every authored attempt into a stable directory so a
+// failed discovery can be debugged offline without spending another portal
+// login. Overwrites each run.
+async function persistDiscovery(artifactsDir, persistDir, attempts, finalError) {
+  if (!persistDir) return;
+  try {
+    await rm(persistDir, { recursive: true, force: true });
+    await mkdir(persistDir, { recursive: true });
+    const entries = await readdir(artifactsDir).catch(() => []);
+    for (const name of entries) {
+      if (/\.(png|json|mjs)$/.test(name)) {
+        await copyFile(path.join(artifactsDir, name), path.join(persistDir, name)).catch(() => {});
+      }
+    }
+    await writeFile(
+      path.join(persistDir, "attempts.json"),
+      JSON.stringify({ attempts, finalError }, null, 2),
+    );
+  } catch {
+    /* diagnostics are best-effort */
+  }
+}
+
+// One login, then loop: explore -> let codex author a locator from the
+// evidence -> validate it in the SAME session. On a failed attempt, feed the
+// attempt and its error back so codex can correct. All attempts share the one
+// authenticated session, so discovery costs a single portal login regardless
+// of how many tries it takes.
 export async function discover({
   credentials,
   portalUrl,
@@ -114,6 +140,8 @@ export async function discover({
   failedLocatorPath,
   promptPath,
   schemaPath,
+  persistDir,
+  maxAttempts = 3,
   timeoutMs = 180_000,
   codexTimeoutMs = 480_000,
   codexBin = process.env.SOLAX_KEY_AGENT_CODEX_BIN || "codex",
@@ -122,28 +150,54 @@ export async function discover({
     { credentials, portalUrl, artifactsDir, timeoutMs },
     async ({ page, context, log }) => {
       const exploration = await exploreForToken({ page, context, artifactsDir, log });
-      const failedLocator = failedLocatorPath
+      const seedLocator = failedLocatorPath
         ? await readFile(failedLocatorPath, "utf8").catch(() => "")
         : "";
-      const { script } = await invokeCodexDiscovery({
-        bundlePath: exploration.bundlePath,
-        artifactsDir,
-        failedLocator,
-        promptPath,
-        schemaPath,
-        timeoutMs: codexTimeoutMs,
-        codexBin,
-      });
-      if (typeof script !== "string" || script.length < 50) {
-        throw new Error("DISCOVERY_SCRIPT_INVALID");
+      const attempts = [];
+      let failedLocator = seedLocator;
+      let errorText = "the current locator no longer finds the tokenID";
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        log(`discovery attempt ${attempt}/${maxAttempts}`);
+        let script;
+        try {
+          ({ script } = await invokeCodexDiscovery({
+            bundlePath: exploration.bundlePath,
+            artifactsDir,
+            failedLocator,
+            errorText,
+            promptPath,
+            schemaPath,
+            timeoutMs: codexTimeoutMs,
+            codexBin,
+          }));
+        } catch (authorError) {
+          errorText = authorError.message;
+          attempts.push({ attempt, stage: "author", error: errorText });
+          continue;
+        }
+        if (typeof script !== "string" || script.length < 50) {
+          errorText = "authored script was too short to be a locator";
+          attempts.push({ attempt, stage: "author", error: errorText });
+          continue;
+        }
+        const candidatePath = path.join(artifactsDir, `discovered-${attempt}.mjs`);
+        await writeFile(candidatePath, script, { mode: 0o600 });
+        try {
+          const tokenId = await runLocatorOnPage(candidatePath, page, context, log);
+          log(`discovery attempt ${attempt} validated in-session`);
+          attempts.push({ attempt, stage: "validate", ok: true });
+          await persistDiscovery(artifactsDir, persistDir, attempts, null);
+          return { script, tokenId };
+        } catch (validateError) {
+          // Feed this failed attempt back to the next authoring round.
+          failedLocator = script;
+          errorText = validateError.message;
+          attempts.push({ attempt, stage: "validate", error: errorText });
+          log(`discovery attempt ${attempt} did not validate: ${errorText}`);
+        }
       }
-      // Validate the freshly authored locator in this same authenticated
-      // session — no extra login — before it is allowed to become current.
-      const candidatePath = path.join(artifactsDir, "discovered-locator.mjs");
-      await writeFile(candidatePath, script, { mode: 0o600 });
-      const tokenId = await runLocatorOnPage(candidatePath, page, context, log);
-      log("discovered locator validated in-session");
-      return { script, tokenId };
+      await persistDiscovery(artifactsDir, persistDir, attempts, errorText);
+      throw new Error(`DISCOVERY_EXHAUSTED_AFTER_${maxAttempts}:${errorText}`);
     },
   );
 }
@@ -207,6 +261,7 @@ export async function invokeCodexDiscovery({
   bundlePath,
   artifactsDir,
   failedLocator,
+  errorText,
   promptPath,
   schemaPath,
   timeoutMs = 480_000,
@@ -218,6 +273,11 @@ export async function invokeCodexDiscovery({
     await writeFile(
       path.join(workDir, "failed-locator.mjs"),
       String(failedLocator || "// (none)"),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(workDir, "error.txt"),
+      String(errorText || "the current locator no longer finds the tokenID").slice(0, 4000),
       { mode: 0o600 },
     );
     // Include the page screenshots so codex can see the rendered UI.
@@ -236,6 +296,9 @@ export async function invokeCodexDiscovery({
       "--ignore-user-config",
       "--sandbox", "read-only",
       "--skip-git-repo-check",
+      // Authoring a navigation script from screenshots and a DOM outline is a
+      // hard reasoning task; the default effort produced brittle guesses.
+      "-c", "model_reasoning_effort=high",
       "--cd", workDir,
       "--output-schema", schemaPath,
       "--output-last-message", outputPath,

@@ -67,6 +67,9 @@ const engine = createEngine({
       failedLocatorPath,
       promptPath: path.join(directory, "discover-prompt.md"),
       schemaPath: path.join(directory, "discover-output.schema.json"),
+      // Keep the last run's evidence and authored attempts for offline
+      // debugging without spending another portal login.
+      persistDir: path.join(stateDir, "last-discovery"),
       timeoutMs: extractionTimeoutMs,
       codexTimeoutMs,
     });
