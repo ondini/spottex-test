@@ -235,7 +235,12 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
   const documentIds = [...new Set(allItems.flatMap((item) => item.versions[0]?.sourceDocumentId ? [item.versions[0].sourceDocumentId] : []))];
   const documentsUrl = new URL("api/v1/documents", baseUrl);
   documentIds.forEach((id) => documentsUrl.searchParams.append("id", id));
-  const documents = await costsGet(baseUrl, `${documentsUrl.pathname}${documentsUrl.search}`).then((value) => documentsResponseSchema.parse(value));
+  // Costs answers a document lookup without ids with HTTP 400, so an empty
+  // snapshot (no published energy items) must not turn into a failed sync —
+  // there is simply nothing to archive.
+  const documents = documentIds.length
+    ? await costsGet(baseUrl, `${documentsUrl.pathname}${documentsUrl.search}`).then((value) => documentsResponseSchema.parse(value))
+    : { documents: [] as z.infer<typeof documentsResponseSchema>["documents"] };
   const documentById = new Map(documents.documents.map((document) => [document.id, document] as const));
   let importedPublished = 0;
   let skippedIncomplete = 0;
