@@ -7,6 +7,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
 
+import { clampAnalysisWindow, latestPublishedMarketSeries } from "./analysis-window";
 import { generatePriceCurve, type HdoValue, type PricingMode } from "./curve";
 import { compileTimeRules } from "./time-rules";
 
@@ -536,7 +537,7 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
   // Missing measurements/profile are already surfaced as workspace blockers,
   // so the early return reports no current-tariff error of its own.
   if (!site?.technicalProfile || !quality.from || !quality.to) return { created: 0, skipped: 0, errors: ["PRICE_CURVE_SITE_DATA_MISSING"], currentTariffErrors: [] as string[] };
-  const validFrom = new Date(quality.from);
+  const measuredFrom = new Date(quality.from);
   const dataValidTo = new Date(new Date(quality.to).getTime() + 15 * 60_000);
   const pricingAsOf = new Date();
   const confirmedDistributorCode = site.technicalProfile.distributorCode?.trim();
@@ -544,11 +545,17 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
     confirmedDistributorCode ||
     process.env.ANALYSIS_REFERENCE_DISTRIBUTOR_CODE ||
     "CEZ_DISTRIBUCE";
-  const [products, distributions, market] = await Promise.all([
+  const [products, distributions, latestMarket] = await Promise.all([
     prisma.energyProductVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], product: { active: true, customerSegment: "HOUSEHOLD" } }, include: { product: { include: { supplier: true } } }, orderBy: [{ productId: "asc" }, { validFrom: "desc" }], distinct: ["productId"], take: 100 }),
     prisma.distributionTariffVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], distributionTariff: { active: true, customerSegment: "HOUSEHOLD", distributor: { code: comparisonDistributorCode } } }, include: { distributionTariff: true }, orderBy: [{ distributionTariffId: "asc" }, { validFrom: "desc" }], distinct: ["distributionTariffId"], take: 24 }),
-    prisma.marketPriceSeries.findFirst({ where: { status: "PUBLISHED", validFrom: { lte: validFrom }, validTo: { gte: dataValidTo } }, orderBy: { validFrom: "desc" } }),
+    latestPublishedMarketSeries(),
   ]);
+  // Spot tariffs can only be priced where the OTE series exists, so the curve
+  // window starts at the later of first measurement and series start; a series
+  // that does not overlap the measurements at all is treated as absent.
+  const window = clampAnalysisWindow({ from: measuredFrom, to: dataValidTo }, latestMarket);
+  const market = window.empty ? null : latestMarket;
+  const validFrom = window.from;
   // Materialize through the end of the already published market series. Live
   // measurements advance every quarter-hour; ending curves exactly at the
   // newest measurement forced all tariff curves (and hundreds of thousands

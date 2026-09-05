@@ -93,4 +93,38 @@ describe("energy data quality", () => {
     expect(quality.readyForEstimate).toBe(false);
     expect(quality.message).toContain("Energetická bilance nesedí");
   });
+
+  it("opens the estimate on recent complete days even when the whole span is sparse", () => {
+    const now = new Date("2026-09-06T00:00:00.000Z");
+    const day = 86_400_000;
+    const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const shift = (items: ReturnType<typeof intervals>, offsetMs: number) =>
+      items.map((item) => ({ ...item, startAt: new Date(item.startAt.getTime() + offsetMs), endAt: new Date(item.endAt.getTime() + offsetMs) }));
+    // Twelve sparse days a year ago, then 35 complete days ending yesterday.
+    const old = shift(intervals(96 * 12), now.getTime() - 300 * day - base);
+    const recent = shift(intervals(96 * 35), now.getTime() - 36 * day - base);
+    const data = [...old, ...recent];
+    const quality = summarizeEnergyDataQuality({ production: data, consumption: data, minimumDays: 7, now });
+    expect(quality.recentCompleteDays).toBe(35);
+    expect(quality.coveragePercent).toBeLessThan(75);
+    expect(quality.readyForEstimate).toBe(true);
+    expect(quality.confidence).toBe("LOW");
+    expect(quality.message).toContain("za posledních 90 dní");
+  });
+
+  it("keeps a sparse and stale history blocked and says how many recent days are needed", () => {
+    const now = new Date("2026-09-06T00:00:00.000Z");
+    const day = 86_400_000;
+    const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const shift = (items: ReturnType<typeof intervals>, offsetMs: number) =>
+      items.map((item) => ({ ...item, startAt: new Date(item.startAt.getTime() + offsetMs), endAt: new Date(item.endAt.getTime() + offsetMs) }));
+    const data = [
+      ...shift(intervals(96 * 6), now.getTime() - 320 * day - base),
+      ...shift(intervals(96 * 6), now.getTime() - 150 * day - base),
+    ];
+    const quality = summarizeEnergyDataQuality({ production: data, consumption: data, minimumDays: 7, now });
+    expect(quality.recentCompleteDays).toBe(0);
+    expect(quality.readyForEstimate).toBe(false);
+    expect(quality.message).toContain("30 úplných dní za posledních 90 dní");
+  });
 });

@@ -12,6 +12,8 @@ import {
 } from "@/lib/energy/legacy-client";
 import { prisma } from "@/lib/prisma";
 
+import { planMarketSeriesPublish } from "./market-series-plan";
+
 const legacySourceUrl =
   "https://www.ote-cr.cz/cs/kratkodobe-trhy/elektrina/denni-trh?time_resolution=PT15M";
 
@@ -90,6 +92,34 @@ export async function publishOteMarketSeries(input: {
       where: { id: same.id },
       data: { status: "PUBLISHED" },
     });
+  }
+
+  const current = await prisma.marketPriceSeries.findFirst({
+    where: { market: "OTE_DAY_AHEAD", status: "PUBLISHED" },
+    orderBy: { validTo: "desc" },
+  });
+  if (
+    current &&
+    planMarketSeriesPublish({ current, validFrom, sourceUrl: input.sourceUrl }) === "EXTEND"
+  ) {
+    return prisma.$transaction(
+      async (tx) => {
+        await tx.marketPricePoint.deleteMany({ where: { seriesId: current.id } });
+        for (let index = 0; index < normalized.length; index += 5_000) {
+          await tx.marketPricePoint.createMany({
+            data: normalized.slice(index, index + 5_000).map((point) => ({
+              seriesId: current.id,
+              ...point,
+            })),
+          });
+        }
+        return tx.marketPriceSeries.update({
+          where: { id: current.id },
+          data: { validTo, sourceUrl: input.sourceUrl, sourceSha256: fingerprint },
+        });
+      },
+      { maxWait: 10_000, timeout: 120_000 },
+    );
   }
 
   return prisma.$transaction(
