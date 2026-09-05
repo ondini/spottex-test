@@ -12,6 +12,7 @@ import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
 import { prepareAnalysisDefaults } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
 import { calculateAnnualControlOffer } from "@/lib/commerce/service-offer";
+import { clampAnalysisWindow, latestPublishedMarketSeries } from "@/lib/pricing/analysis-window";
 import {
   breakerMonthlyFee,
   ensurePublishedCatalogCurvesForSite,
@@ -393,6 +394,7 @@ export async function getAnalysisWorkspace(
       refreshRemote: false,
     });
   }
+  const marketSeries = await latestPublishedMarketSeries();
   const sites = await prisma.energySite.findMany({
     where: {
       userId,
@@ -549,10 +551,22 @@ export async function getAnalysisWorkspace(
     sites: sites.map((site) => {
       const dataQuality = quality.get(site.id)!;
       const profile = site.technicalProfile;
-      const dataFrom = dataQuality.from ? new Date(dataQuality.from) : null;
-      const dataTo = dataQuality.to
-        ? new Date(new Date(dataQuality.to).getTime() + 15 * 60_000)
-        : null;
+      // Same clamp as the analysis itself, otherwise SPOT and baseline curves
+      // that start at the market series would never be listed as eligible.
+      const measuredWindow =
+        dataQuality.from && dataQuality.to
+          ? clampAnalysisWindow(
+              {
+                from: new Date(dataQuality.from),
+                to: new Date(new Date(dataQuality.to).getTime() + 15 * 60_000),
+              },
+              marketSeries,
+            )
+          : null;
+      const dataFrom =
+        measuredWindow && !measuredWindow.empty ? measuredWindow.from : null;
+      const dataTo =
+        measuredWindow && !measuredWindow.empty ? measuredWindow.to : null;
       const eligibleCurves =
         dataFrom && dataTo
           ? site.priceCurves.filter(
@@ -943,9 +957,18 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
     profile.batteryCapacityKwh == null
   )
     throw new Error("ANALYSIS_PROFILE_UNCONFIRMED");
-  const dataFrom = new Date(quality.from);
-  const dataTo = new Date(new Date(quality.to).getTime() + 15 * 60_000);
-  await ensureOteMarketCoverage(userId, dataFrom, dataTo);
+  const measuredFrom = new Date(quality.from);
+  const measuredTo = new Date(new Date(quality.to).getTime() + 15 * 60_000);
+  await ensureOteMarketCoverage(userId, measuredFrom, measuredTo);
+  // Every tariff is priced over one period the OTE series can cover; see
+  // clampAnalysisWindow for why measurements before the market data are cut.
+  const window = clampAnalysisWindow(
+    { from: measuredFrom, to: measuredTo },
+    await latestPublishedMarketSeries(),
+  );
+  if (window.empty) throw new Error("ANALYSIS_HISTORY_INSUFFICIENT");
+  const dataFrom = window.from;
+  const dataTo = window.to;
   const curveMaterialization = await ensurePublishedCatalogCurvesForSite(
     userId,
     site.id,

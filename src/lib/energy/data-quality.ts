@@ -41,6 +41,9 @@ export type EnergyDataQuality = {
   coverageDays: number;
   spanDays: number;
   coveragePercent: number;
+  recentCompleteDays: number;
+  recentWindowDays: number;
+  recentMinimumDays: number;
   confidence: "NONE" | "LOW" | "MEDIUM" | "HIGH";
   readyForEstimate: boolean;
   minimumDays: number;
@@ -54,8 +57,14 @@ export function summarizeEnergyDataQuality(input: {
   gridImport?: Array<{ startAt: Date; endAt: Date; kwh?: number }>;
   gridExport?: Array<{ startAt: Date; endAt: Date; kwh?: number }>;
   minimumDays?: number;
+  now?: Date;
+  recentWindowDays?: number;
+  recentMinimumDays?: number;
 }): EnergyDataQuality {
   const minimumDays = input.minimumDays ?? 7;
+  const now = input.now ?? new Date();
+  const recentWindowDays = input.recentWindowDays ?? 90;
+  const recentMinimumDays = input.recentMinimumDays ?? 30;
   const duplicateIntervals = (items: Array<{ startAt: Date }>) => items.length - new Set(items.map((item) => item.startAt.getTime())).size;
   const overlappingIntervals = (items: Array<{ startAt: Date; endAt: Date }>) => {
     const sorted = [...items].sort((left, right) => left.startAt.getTime() - right.startAt.getTime() || left.endAt.getTime() - right.endAt.getTime());
@@ -111,6 +120,9 @@ export function summarizeEnergyDataQuality(input: {
       coverageDays: 0,
       spanDays: 0,
       coveragePercent: 0,
+      recentCompleteDays: 0,
+      recentWindowDays,
+      recentMinimumDays,
       confidence: "NONE",
       readyForEstimate: false,
       minimumDays,
@@ -186,7 +198,17 @@ export function summarizeEnergyDataQuality(input: {
     : coverageDays >= 30 && coveragePercent >= 80
       ? "MEDIUM"
       : "LOW";
-  const readyForEstimate = coverageDays >= minimumDays && coveragePercent >= 75 && invalidDurationIntervals === 0 && duplicates === 0 && overlaps === 0 && (!balanceCanBlock || balanceFailureRate <= 0.05);
+  const recentStart = now.getTime() - recentWindowDays * 86_400_000;
+  const recentMatched = matched.filter((timestamp) => timestamp >= recentStart && timestamp <= now.getTime()).length;
+  const recentCompleteDays = Math.round((recentMatched / 96) * 10) / 10;
+  const integrityOk = invalidDurationIntervals === 0 && duplicates === 0 && overlaps === 0 && (!balanceCanBlock || balanceFailureRate <= 0.05);
+  // Two ways in: a dense history across its whole span, or enough complete
+  // days in the recent window. The second is what lets a plant whose old cloud
+  // history is sparse start its analysis once live data has accumulated,
+  // instead of waiting months for the whole-span percentage to recover.
+  const denseHistory = coverageDays >= minimumDays && coveragePercent >= 75;
+  const recentHistory = recentCompleteDays >= recentMinimumDays;
+  const readyForEstimate = integrityOk && (denseHistory || recentHistory);
   const roundedDays = Math.round(coverageDays * 10) / 10;
   return {
     from: new Date(first).toISOString(),
@@ -213,17 +235,22 @@ export function summarizeEnergyDataQuality(input: {
     coverageDays: roundedDays,
     spanDays: Math.round(spanDays * 10) / 10,
     coveragePercent: Math.round(coveragePercent * 10) / 10,
+    recentCompleteDays,
+    recentWindowDays,
+    recentMinimumDays,
     confidence,
     readyForEstimate,
     minimumDays,
     message: readyForEstimate
       ? confidence === "HIGH"
         ? "Historie je dostatečná pro sezónní srovnání."
-        : `Máme ${completeDaysLabel(roundedDays)} dat. Výsledek bude označený jako orientační.`
+        : denseHistory
+          ? `Máme ${completeDaysLabel(roundedDays)} dat. Výsledek bude označený jako orientační.`
+          : `Máme ${completeDaysLabel(roundedDays)} dat, z toho ${recentCompleteDays.toLocaleString("cs-CZ")} úplných dní za posledních ${recentWindowDays} dní. Výsledek bude označený jako orientační.`
       : balanceCanBlock && balanceFailureRate > 0.05
         ? `Energetická bilance nesedí u ${Math.round(balanceFailureRate * 100)} % úplných intervalů. Před analýzou je nutná kontrola znamének a jednotek.`
         : coverageDays >= minimumDays && coveragePercent < 75
-          ? `Máme ${completeDaysLabel(roundedDays)} měření, ale v časovém rozsahu historie pokrývají jen ${Math.round(coveragePercent * 10) / 10} %. Pro bezpečný odhad je potřeba alespoň 75 %; SolaX cloud v chybějících obdobích nevrátil data. Chybějící úseky zkoušíme každý den doplnit automaticky.`
+          ? `Máme ${completeDaysLabel(roundedDays)} měření, ale v časovém rozsahu historie pokrývají jen ${Math.round(coveragePercent * 10) / 10} %. Pro bezpečný odhad je potřeba alespoň 75 %, nebo ${recentMinimumDays} úplných dní za posledních ${recentWindowDays} dní (teď ${recentCompleteDays.toLocaleString("cs-CZ")}); SolaX cloud v chybějících obdobích nevrátil data. Chybějící úseky zkoušíme každý den doplnit automaticky.`
         : `Pro první odhad potřebujeme alespoň ${minimumDays} úplných dní v 15minutových intervalech.`,
   };
 }
@@ -309,6 +336,7 @@ async function computeEnergyDataQuality(
     gridImport: intervals.filter((item) => item.kind === EnergyIntervalKind.GRID_IMPORT),
     gridExport: intervals.filter((item) => item.kind === EnergyIntervalKind.GRID_EXPORT),
     minimumDays: site.provider === EnergyProvider.DEMO ? 0.25 : 7,
+    now: new Date(),
   });
 }
 
