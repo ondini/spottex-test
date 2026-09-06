@@ -2318,7 +2318,7 @@ export async function recoverStaleAnalysisJobs(
   let failed = 0;
   for (const job of jobs) {
     if (job.type === ENERGY_ANALYSIS_PREPARE_JOB) {
-      const retry = job.attempts < ANALYSIS_MAX_ATTEMPTS;
+      const retry = force || job.attempts < ANALYSIS_MAX_ATTEMPTS;
       await prisma.scheduledJob.update({
         where: { id: job.id },
         data: retry
@@ -2328,6 +2328,7 @@ export async function recoverStaleAnalysisJobs(
               lockedAt: null,
               lastError: "Recovered interrupted analysis preparation",
               completedAt: null,
+              ...(force ? { attempts: { decrement: 1 } } : {}),
             }
           : {
               status: JobStatus.FAILED,
@@ -2354,7 +2355,10 @@ export async function recoverStaleAnalysisJobs(
       failed += 1;
       continue;
     }
-    const retry = job.attempts < ANALYSIS_MAX_ATTEMPTS;
+    // A worker handing its own job back (force) is not the job's fault: it is
+    // always requeued and the attempt the interrupted claim consumed is
+    // refunded, so deploys cannot exhaust a long run's retries.
+    const retry = force || job.attempts < ANALYSIS_MAX_ATTEMPTS;
     await prisma.$transaction([
       prisma.energyAnalysisRun.updateMany({
         where: { id: payload.data.analysisRunId, status: "RUNNING" },
@@ -2385,6 +2389,7 @@ export async function recoverStaleAnalysisJobs(
               lockedAt: null,
               lastError: "Recovered interrupted analysis",
               completedAt: null,
+              ...(force ? { attempts: { decrement: 1 } } : {}),
             }
           : {
               status: JobStatus.FAILED,

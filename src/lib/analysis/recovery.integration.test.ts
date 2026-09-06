@@ -40,7 +40,7 @@ describe("analysis worker recovery", () => {
       await expect(recoverStaleAnalysisJobs(now, undefined, { force: true })).resolves.toEqual({ scanned: 0, recovered: 0, failed: 0 });
       await expect(recoverStaleAnalysisJobs(now, [job.id], { force: true })).resolves.toEqual({ scanned: 1, recovered: 1, failed: 0 });
       await expect(prisma.energyAnalysisRun.findUniqueOrThrow({ where: { id: run.id }, select: { status: true, errorCode: true } })).resolves.toEqual({ status: "QUEUED", errorCode: "ANALYSIS_WORKER_INTERRUPTED" });
-      await expect(prisma.scheduledJob.findUniqueOrThrow({ where: { id: job.id }, select: { status: true, lockedAt: true, runAt: true } })).resolves.toEqual({ status: "PENDING", lockedAt: null, runAt: now });
+      await expect(prisma.scheduledJob.findUniqueOrThrow({ where: { id: job.id }, select: { status: true, lockedAt: true, runAt: true, attempts: true } })).resolves.toEqual({ status: "PENDING", lockedAt: null, runAt: now, attempts: 0 });
     } finally {
       await prisma.scheduledJob.deleteMany({ where: { id: job.id } });
       await prisma.energyAnalysisRun.deleteMany({ where: { id: run.id } });
