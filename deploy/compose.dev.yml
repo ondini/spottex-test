@@ -88,6 +88,9 @@ services:
       context: ..
       dockerfile: Dockerfile.dev
     restart: unless-stopped
+    # A recreate lands mid-scenario; the worker hands its job back on SIGTERM
+    # and needs a moment for that write before the container is killed.
+    stop_grace_period: 30s
     environment:
       DATABASE_URL: postgresql://spottex:spottex_dev@web-db:5432/spottex?schema=public
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Use --env-file Secrets/spottex.development.env}

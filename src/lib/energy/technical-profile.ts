@@ -11,6 +11,7 @@ import { supersedeSiteAnalyses } from "@/lib/analysis/invalidation";
 
 import { accessTokenExpiresAt, LegacySpottexClient } from "./legacy-client";
 import { serializeCustomerInvoiceRequest } from "./invoice-view";
+import { normalizeDistributorCode } from "./distributors";
 import { EnergyError } from "./types";
 
 const nullableNumber = (minimum: number, maximum: number) =>
@@ -21,7 +22,9 @@ const nullableCode = z.string().trim().max(80).nullable().optional();
 export const technicalProfilePatchSchema = z.object({
   ean: z.string().trim().max(32).nullable().optional(),
   address: z.string().trim().max(300).nullable().optional(),
-  distributorCode: nullableCode,
+  distributorCode: nullableCode.transform((value) =>
+    value === undefined ? undefined : normalizeDistributorCode(value),
+  ),
   distributionTariffCode: nullableCode,
   phases: z.number().int().min(1).max(3).nullable().optional(),
   mainFuseA: nullableNumber(1, 1000),

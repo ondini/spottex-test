@@ -7,6 +7,8 @@ import { supersedeSiteAnalyses } from "@/lib/analysis/invalidation";
 import { queueEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 
+import { normalizeDistributorCode } from "./distributors";
+
 const nullableText = z.string().trim().max(300).nullable().optional();
 const nullableNumber = (min: number, max: number) =>
   z.number().finite().min(min).max(max).nullable().optional();
@@ -120,7 +122,9 @@ export async function reviewEnergyInvoice(
     const value =
       field === "fixedPriceValidUntil" && rawValue
         ? new Date(String(rawValue))
-        : rawValue;
+        : field === "distributorCode"
+          ? normalizeDistributorCode(rawValue as string | null)
+          : rawValue;
     const current = SITE_FIELDS.has(field)
       ? request.energySite[field as "ean" | "address"]
       : (request.energySite.technicalProfile?.[

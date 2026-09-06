@@ -134,4 +134,11 @@ describe("technical profile readiness", () => {
       batteryMaxDischargeKw: 6.9,
     });
   });
+
+  it("stores the distributor as a canonical code whatever the customer typed", () => {
+    expect(technicalProfilePatchSchema.parse({ distributorCode: "ČEZ" }).distributorCode).toBe("CEZ_DISTRIBUCE");
+    expect(technicalProfilePatchSchema.parse({ distributorCode: " EG.D, s.r.o. " }).distributorCode).toBe("EGD_DISTRIBUCE");
+    expect(technicalProfilePatchSchema.parse({ distributorCode: null }).distributorCode).toBeNull();
+    expect(technicalProfilePatchSchema.parse({})).not.toHaveProperty("distributorCode");
+  });
 });
