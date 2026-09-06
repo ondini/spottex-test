@@ -1174,7 +1174,7 @@ export function AnalysisWorkspace({
                   {pending || site.preparing
                     ? "Kontrolujeme podklady a připravujeme výpočet"
                     : latest?.status === "QUEUED" && latest.errorMessage
-                      ? "Výpočet čeká na automatické opakování"
+                      ? "Výpočet pokračuje automaticky"
                     : latest?.status === "QUEUED"
                       ? "Výpočet čeká ve frontě"
                       : "Porovnáváme sazby, fix a spot"}

@@ -2201,7 +2201,7 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
   const completedAt = new Date();
   const completion = await prisma.energyAnalysisRun.updateMany({
     where: { id: run.id, status: "RUNNING" },
-    data: { status: "COMPLETED", completedAt },
+    data: { status: "COMPLETED", completedAt, errorCode: null, errorMessage: null },
   });
   if (!completion.count) return false;
   if (ANALYSIS_PRODUCTION_READY && run.kind === "BASE") {
@@ -2450,6 +2450,7 @@ export async function processAnalysisJobs(
   });
   let succeeded = 0;
   let failed = 0;
+  let continued = 0;
   for (const job of jobs) {
     await options.onHeartbeat?.();
     if (job.type === ENERGY_ANALYSIS_PREPARE_JOB) {
@@ -2584,6 +2585,47 @@ export async function processAnalysisJobs(
         error instanceof Error
           ? error.message.slice(0, 500)
           : "ANALYSIS_FAILED";
+      if (message === "ANALYSIS_RUN_BUDGET_EXCEEDED") {
+        // Not a failure: the run outgrew one worker cycle. Completed
+        // scenarios are persisted and reused on the next pass, so hand the
+        // job straight back without spending an attempt and tell the
+        // customer how far it got. A PRO run with several hardware variants
+        // legitimately needs a few cycles.
+        const runId = payload.data.analysisRunId;
+        const [total, done] = await Promise.all([
+          prisma.energyAnalysisScenario.count({ where: { analysisRunId: runId } }),
+          prisma.energyAnalysisScenario.count({
+            where: { analysisRunId: runId, status: "COMPLETED" },
+          }),
+        ]);
+        await prisma.$transaction([
+          prisma.energyAnalysisRun.updateMany({
+            where: { id: runId, status: "RUNNING" },
+            data: {
+              status: "QUEUED",
+              errorCode: "ANALYSIS_RUN_CONTINUES",
+              errorMessage: `Výpočet pokračuje po částech: hotovo ${done} z ${total} scénářů, výsledky se průběžně ukládají.`,
+            },
+          }),
+          prisma.energyAnalysisScenario.updateMany({
+            where: { analysisRunId: runId, status: "RUNNING" },
+            data: { status: "QUEUED" },
+          }),
+          prisma.scheduledJob.updateMany({
+            where: { id: job.id, status: "RUNNING", lastError: owner },
+            data: {
+              status: "PENDING",
+              runAt: new Date(),
+              lockedAt: null,
+              attempts: { decrement: 1 },
+              lastError: "ANALYSIS_RUN_CONTINUES",
+              completedAt: null,
+            },
+          }),
+        ]);
+        continued += 1;
+        continue;
+      }
       const retry =
         job.attempts + 1 < ANALYSIS_MAX_ATTEMPTS &&
         !NON_RETRYABLE_ANALYSIS_ERRORS.has(message);
@@ -2633,7 +2675,13 @@ export async function processAnalysisJobs(
     }
   }
   activeAnalysisJobId = null;
-  return { processed: succeeded + failed, succeeded, failed, recovery };
+  return {
+    processed: succeeded + failed + continued,
+    succeeded,
+    failed,
+    continued,
+    recovery,
+  };
 }
 
 export async function cancelQueuedAnalysis(userId: number, runId: string) {
