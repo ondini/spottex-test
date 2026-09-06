@@ -11,6 +11,7 @@ import {
   LegacySpottexClient,
 } from "@/lib/energy/legacy-client";
 import { prisma } from "@/lib/prisma";
+import { EnergyError } from "@/lib/energy/types";
 
 import { planMarketSeriesPublish } from "./market-series-plan";
 
@@ -219,7 +220,17 @@ export async function ensureOteMarketCoverage(
     accessToken: decryptSecret(connection.encryptedAccessToken),
     refreshToken: decryptSecret(connection.encryptedRefreshToken),
   };
-  const client = new LegacySpottexClient({ tokens: before });
+  // Only the app holds the legacy credentials. When an analysis is enqueued
+  // elsewhere (the worker re-queues runs, operators use scripts) there is
+  // nothing to fetch with; the window clamp then prices over the market data
+  // that already exists instead of refusing the run.
+  let client: LegacySpottexClient;
+  try {
+    client = new LegacySpottexClient({ tokens: before });
+  } catch (error) {
+    if (error instanceof EnergyError && error.code === "LEGACY_UNAVAILABLE") return null;
+    throw error;
+  }
   const parsed = responseSchema.parse(
     await client.fetchMarketIntervals(fetchFrom, fetchTo),
   );
