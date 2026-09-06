@@ -119,6 +119,11 @@ export async function createCheckout(
     }
     const configured = (process.env.PAYMENT_PROVIDER || "MOCK").toUpperCase();
     const provider = totalMinor === 0 ? "MANUAL" : configured === "GOPAY" ? "GOPAY" : "MOCK";
+    // MOCK is development-only. A production process without PAYMENT_PROVIDER
+    // (a worker, an operator script) must fail loudly instead of parking the
+    // customer on a mock gateway that refuses to complete.
+    if (provider === "MOCK" && process.env.NODE_ENV === "production")
+      throw new Error("PAYMENT_PROVIDER_UNCONFIGURED");
     const claimed = await tx.cart.updateMany({ where: { id: cart.id, status: "OPEN" }, data: { status: "CHECKOUT", totalMinor } });
     if (!claimed.count) throw new Error("CART_CHECKOUT_IN_PROGRESS");
     const recurring = ["GOPAY", "MOCK"].includes(provider)
