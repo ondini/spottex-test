@@ -142,6 +142,9 @@ services:
       dockerfile: Dockerfile
       target: analysis-worker
     restart: unless-stopped
+    # A recreate lands mid-scenario; the worker hands its job back on SIGTERM
+    # and needs a moment for that write before the container is killed.
+    stop_grace_period: 30s
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?Set application DATABASE_URL}

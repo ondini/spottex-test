@@ -288,7 +288,10 @@ export async function materializeCurrentBaselinePriceCurve(input: {
       status: "PUBLISHED",
       validFrom: { lte: pricingAsOf },
       OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }],
-      distributionTariff: { active: true, customerSegment: "HOUSEHOLD", code: { equals: profile.distributionTariffCode, mode: "insensitive" } },
+      // The customer's own tariff code is authoritative: a business site on a
+      // C rate must find its published version even though the catalog's
+      // comparison set is household-only.
+      distributionTariff: { active: true, code: { equals: profile.distributionTariffCode, mode: "insensitive" } },
     },
     include: { distributionTariff: { include: { distributor: true } } },
     orderBy: { validFrom: "desc" },

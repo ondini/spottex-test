@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+import { normalizeDistributorCode } from "@/lib/energy/distributors";
 import { prisma } from "@/lib/prisma";
 
 import {
@@ -114,6 +115,14 @@ function stringArrayField(values: Spec[], keys: string[]) {
 
 function jsonField(values: Spec[], keys: string[]) {
   return spec(values, keys)?.valueJson ?? null;
+}
+
+// Distribution operators must land on the same canonical codes the invoice
+// import produces, otherwise a customer's "ČEZ" never matches the catalog's
+// "ČEZ Distribuce, a. s." and the baseline tariff is never found.
+function distributorCompanyCode(name: string) {
+  const canonical = normalizeDistributorCode(name);
+  return canonical && canonical !== name.trim() ? canonical : companyCode(name);
 }
 
 function companyCode(name: string) {
@@ -327,9 +336,9 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
     }
     const distributorName = item.brand?.trim() || identityValue(item.metadata, ["distributor"]) || "Distributor neuvedený v Costs";
     const company = await prisma.energyCompany.upsert({
-      where: { code: companyCode(distributorName) },
+      where: { code: distributorCompanyCode(distributorName) },
       update: { name: distributorName, roles: { set: ["DISTRIBUTOR"] }, active: true, metadata: { source: "COSTS", verified: true } },
-      create: { code: companyCode(distributorName), name: distributorName, roles: ["DISTRIBUTOR"], metadata: { source: "COSTS", verified: true } },
+      create: { code: distributorCompanyCode(distributorName), name: distributorName, roles: ["DISTRIBUTOR"], metadata: { source: "COSTS", verified: true } },
     });
     const source = await archiveSourceDocument(baseUrl, document, distribution.snapshot.asOf, "COSTS_ENERGY_DISTRIBUTION", now);
     const tariff = await prisma.distributionTariff.upsert({

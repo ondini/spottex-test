@@ -2295,16 +2295,21 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
   return true;
 }
 
+// `force` skips the stale-lock age check: a worker that is being shut down
+// hands its own in-flight job back immediately instead of leaving it locked
+// for ANALYSIS_STALE_LOCK_MS. It is only meaningful together with `jobIds`.
 export async function recoverStaleAnalysisJobs(
   now = new Date(),
   jobIds?: string[],
+  options: { force?: boolean } = {},
 ) {
   const staleBefore = new Date(now.getTime() - ANALYSIS_STALE_LOCK_MS);
+  const force = Boolean(options.force && jobIds?.length);
   const jobs = await prisma.scheduledJob.findMany({
     where: {
       type: { in: [ENERGY_ANALYSIS_JOB, ENERGY_ANALYSIS_PREPARE_JOB] },
       status: JobStatus.RUNNING,
-      lockedAt: { lt: staleBefore },
+      ...(force ? {} : { lockedAt: { lt: staleBefore } }),
       ...(jobIds ? { id: { in: jobIds } } : {}),
     },
     take: 100,
@@ -2420,6 +2425,13 @@ async function claimAnalysisJob(jobId: string, owner: string) {
   });
 }
 
+// The job this process currently holds, so a shutdown handler can release it.
+let activeAnalysisJobId: string | null = null;
+
+export function getActiveAnalysisJobId() {
+  return activeAnalysisJobId;
+}
+
 export async function processAnalysisJobs(
   options: { limit?: number; onHeartbeat?: () => Promise<void> } = {},
 ) {
@@ -2456,6 +2468,7 @@ export async function processAnalysisJobs(
       }
       const owner = `analysis-prepare:${randomUUID()}`;
       if (!(await claimAnalysisJob(job.id, owner))) continue;
+      activeAnalysisJobId = job.id;
       try {
         await enqueueAnalysis(
           preparation.data.userId,
@@ -2515,6 +2528,7 @@ export async function processAnalysisJobs(
     }
     const owner = `analysis:${randomUUID()}`;
     if (!(await claimAnalysisJob(job.id, owner))) continue;
+    activeAnalysisJobId = job.id;
     const started = await prisma.energyAnalysisRun.updateMany({
       where: { id: payload.data.analysisRunId, status: "QUEUED" },
       data: { status: "RUNNING", startedAt: new Date() },
@@ -2618,6 +2632,7 @@ export async function processAnalysisJobs(
       failed += 1;
     }
   }
+  activeAnalysisJobId = null;
   return { processed: succeeded + failed, succeeded, failed, recovery };
 }
 
