@@ -73,4 +73,16 @@ describe("analysis curve selection", () => {
       curves.map(({ id }) => id),
     );
   });
+
+  it("keeps the customer's own product on another rate next to the best catalog product", () => {
+    const selected = selectAnalysisCurveIds(
+      [
+        { id: "own-d25", purpose: "CURRENT_PRODUCT:5", buyMode: "FIX", sellMode: "FIX", distributionCode: "D25d" },
+        { id: "catalog-d25", purpose: "CATALOG_BEST:FIX:FIX:5", buyMode: "FIX", sellMode: "FIX", distributionCode: "D25d", selectionScore: 1 },
+        { id: "baseline", purpose: "CURRENT_BASELINE", buyMode: "FIX", sellMode: "FIX", distributionCode: "D02d" },
+      ],
+      false,
+    );
+    expect(selected).toEqual(["own-d25", "catalog-d25", "baseline"]);
+  });
 });

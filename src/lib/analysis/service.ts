@@ -279,10 +279,15 @@ function curveLabel(curve: {
   );
   const modeledLabel =
     typeof currentInput.label === "string" ? currentInput.label : null;
+  const ownProduct =
+    curve.purpose === "CURRENT_BASELINE" ||
+    curve.purpose.startsWith("CURRENT_PRODUCT:");
   const product =
-    curve.purpose === "CURRENT_BASELINE"
+    ownProduct
       ? [
-          "Váš současný produkt",
+          curve.purpose === "CURRENT_BASELINE"
+            ? "Váš současný produkt"
+            : "Váš dodavatel, jiná sazba",
           currentPriceInput.supplier,
           currentPriceInput.product,
         ]
@@ -1021,8 +1026,10 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
       (curve.sellProductVersion?.product.active ?? true) &&
       (curve.distributionVersion?.distributionTariff.active ?? true),
   );
-  const candidateCurves = activeCurves.some((curve) =>
-    curve.purpose.startsWith("CATALOG"),
+  const candidateCurves = activeCurves.some(
+    (curve) =>
+      curve.purpose.startsWith("CATALOG") ||
+      curve.purpose.startsWith("CURRENT_PRODUCT:"),
   )
     ? activeCurves.filter(
         (curve) => curve.purpose !== "MODELED_STANDARD_CZ_2026",

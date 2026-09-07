@@ -27,7 +27,11 @@ export function selectAnalysisCurveIds(
       selected.add(curve.id);
       continue;
     }
-    const group = `${curve.buyMode ?? "UNKNOWN"}:${curve.sellMode ?? "UNKNOWN"}:${curve.distributionCode ?? "UNKNOWN"}`;
+    // "Keep my supplier, change the distribution rate" is a different
+    // decision from "switch to the best catalog product on that rate", so the
+    // two families never compete for one slot.
+    const family = curve.purpose.startsWith("CURRENT_PRODUCT:") ? "CURRENT_PRODUCT" : "CATALOG";
+    const group = `${family}:${curve.buyMode ?? "UNKNOWN"}:${curve.sellMode ?? "UNKNOWN"}:${curve.distributionCode ?? "UNKNOWN"}`;
     const current = groups.get(group);
     if (
       !current ||
