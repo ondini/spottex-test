@@ -6,6 +6,8 @@ import { EnergyIntervalKind, JobStatus, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { queueEmail } from "@/lib/email";
+
+import { buildAnalysisCompletionEmail } from "./completion-email";
 import { getCostsCatalogSummary } from "@/lib/costs/client";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
 import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
@@ -130,6 +132,10 @@ const PRICE_CURVE_WARNING_MESSAGES: Record<string, string> = {
     "Vlastní tarif nelze sestavit: chybí fixní nákupní cena.",
   PRICE_CURVE_CURRENT_SELL_PRICE_MISSING:
     "Vlastní tarif nelze sestavit: chybí fixní výkupní cena.",
+  PRICE_CURVE_CURRENT_BUY_FEE_MISSING:
+    "Vlastní tarif nelze sestavit: chybí poplatek za spotový nákup (přirážka k ceně OTE).",
+  PRICE_CURVE_CURRENT_SELL_FEE_MISSING:
+    "Vlastní tarif nelze sestavit: chybí poplatek za spotový výkup (srážka z ceny OTE).",
   PRICE_CURVE_MARKET_SERIES_MISSING:
     "Vlastní tarif nelze sestavit: nejsou publikované tržní ceny pro spotovou část.",
   PRICE_CURVE_VAT_NOT_INCLUDED:
@@ -331,12 +337,26 @@ function investmentSummary(value: unknown) {
     typeof monthlyPaymentCzk !== "number"
   )
     return null;
+  const reference = (value: unknown) => {
+    const nested = object(value as Prisma.JsonValue);
+    return typeof nested.annualSavingsCzk === "number"
+      ? {
+          annualSavingsCzk: nested.annualSavingsCzk,
+          simplePaybackYears:
+            typeof nested.simplePaybackYears === "number"
+              ? nested.simplePaybackYears
+              : null,
+        }
+      : null;
+  };
   return {
     grantCzk,
     effectiveInvestmentCzk,
     monthlyPaymentCzk,
     simplePaybackYears:
       typeof simplePaybackYears === "number" ? simplePaybackYears : null,
+    vsCurrentControl: reference(source.vsCurrentControl),
+    vsOptimizedControl: reference(source.vsOptimizedControl),
   };
 }
 
@@ -2004,6 +2024,59 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
     });
     await onProgress?.();
   }
+  // Investment reference: the plant as it runs today (current hardware,
+  // current tariff, current control mode) and the same plant with optimized
+  // control. A hardware variant is assessed against both, so buying hardware
+  // is never credited with savings that control alone would bring, and the
+  // customer sees what the purchase adds on top of switching control on.
+  const HARDWARE_FIELDS = [
+    "batteryCapacityKwh",
+    "batteryMaxChargeKw",
+    "batteryMaxDischargeKw",
+    "pvCapacityKwp",
+    "maxGridInputKw",
+    "maxGridOutputKw",
+    "mainFuseA",
+  ] as const;
+  const currentHardwareInput = object(
+    object(run.inputs).current as Prisma.JsonValue,
+  );
+  type HardwareLike = { [K in (typeof HARDWARE_FIELDS)[number]]: number | null };
+  const isCurrentHardware = (candidate: HardwareLike) =>
+    HARDWARE_FIELDS.every((field) => {
+      const expected = currentHardwareInput[field];
+      return typeof expected === "number" ? candidate[field] === expected : true;
+    });
+  const currentControlMode: "SMART" | "SELF_USE" = profile.controlConfirmedAt
+    ? "SMART"
+    : "SELF_USE";
+  const investmentTerms = {
+    grant: grantVersion
+      ? {
+          subsidyRatePct: nullableNumber(grantVersion.subsidyRatePct),
+          maximumAmountCzk: nullableNumber(grantVersion.maximumAmountCzk),
+          calculationFormula: grantVersion.calculationFormula,
+        }
+      : null,
+    loan: loanVersion
+      ? {
+          principalCzk:
+            typeof investmentInput.financedAmountCzk === "number"
+              ? investmentInput.financedAmountCzk
+              : 0,
+          termMonths:
+            typeof investmentInput.termMonths === "number"
+              ? investmentInput.termMonths
+              : 0,
+          aprPct: number(loanVersion.aprPct),
+          feesCzk: number(loanVersion.feesCzk),
+          minimumAmountCzk: nullableNumber(loanVersion.minimumAmountCzk),
+          maximumAmountCzk: nullableNumber(loanVersion.maximumAmountCzk),
+          termMonthsMin: Number(object(loanVersion.conditions).termMonthsMin),
+          termMonthsMax: Number(object(loanVersion.conditions).termMonthsMax),
+        }
+      : null,
+  };
   for (const scenario of run.scenarios) {
     const computed = results.get(scenario.id)!;
     const sameHardware = (candidate: typeof scenario) =>
@@ -2062,50 +2135,63 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
           computed.evaluatedConsumptionKwh,
       ) &&
       solverFallbacks === 0;
+    // The reference tariff is the customer's own when it is priced; without
+    // it (tariff unknown) the variant is measured against today's hardware on
+    // the same price curve, which still isolates what the hardware adds.
+    const referenceCurveId =
+      run.scenarios.find(
+        (candidate) =>
+          candidate.priceCurve.purpose === "CURRENT_BASELINE" &&
+          isCurrentHardware(candidate),
+      )?.priceCurveId ?? scenario.priceCurveId;
+    const referenceFor = (mode: "SMART" | "SELF_USE") => {
+      const found = run.scenarios.find(
+        (candidate) =>
+          isCurrentHardware(candidate) &&
+          candidate.priceCurveId === referenceCurveId &&
+          candidate.controlMode === mode,
+      );
+      return found ? (results.get(found.id) ?? null) : null;
+    };
+    const todayReference = referenceFor(currentControlMode);
+    const optimizedReference = referenceFor("SMART");
+    const assessAgainst = (reference: { annualCostCzk: number }) =>
+      calculateInvestmentAssessment({
+        capexCzk: investmentCapexCzk ?? 0,
+        annualSavingsCzk: reference.annualCostCzk - computed.annualCostCzk,
+        grant: investmentTerms.grant,
+        loan: investmentTerms.loan,
+      });
     const investmentAssessment =
-      investmentCapexCzk == null
+      investmentCapexCzk == null ||
+      isCurrentHardware(scenario) ||
+      !todayReference
         ? null
-        : calculateInvestmentAssessment({
-            capexCzk: investmentCapexCzk,
-            annualSavingsCzk: currentBaselineComputed
-              ? currentBaselineComputed.annualCostCzk - computed.annualCostCzk
-              : 0,
-            grant: grantVersion
-              ? {
-                  subsidyRatePct: nullableNumber(grantVersion.subsidyRatePct),
-                  maximumAmountCzk: nullableNumber(
-                    grantVersion.maximumAmountCzk,
-                  ),
-                  calculationFormula: grantVersion.calculationFormula,
-                }
-              : null,
-            loan: loanVersion
-              ? {
-                  principalCzk:
-                    typeof investmentInput.financedAmountCzk === "number"
-                      ? investmentInput.financedAmountCzk
-                      : 0,
-                  termMonths:
-                    typeof investmentInput.termMonths === "number"
-                      ? investmentInput.termMonths
-                      : 0,
-                  aprPct: number(loanVersion.aprPct),
-                  feesCzk: number(loanVersion.feesCzk),
-                  minimumAmountCzk: nullableNumber(
-                    loanVersion.minimumAmountCzk,
-                  ),
-                  maximumAmountCzk: nullableNumber(
-                    loanVersion.maximumAmountCzk,
-                  ),
-                  termMonthsMin: Number(
-                    object(loanVersion.conditions).termMonthsMin,
-                  ),
-                  termMonthsMax: Number(
-                    object(loanVersion.conditions).termMonthsMax,
-                  ),
-                }
-              : null,
-          });
+        : (() => {
+            const vsCurrentControl = assessAgainst(todayReference);
+            const vsOptimizedControl = optimizedReference
+              ? assessAgainst(optimizedReference)
+              : null;
+            return {
+              ...vsCurrentControl,
+              reference: {
+                hardware: "CURRENT",
+                priceCurveId: referenceCurveId,
+                controlMode: currentControlMode,
+              },
+              vsCurrentControl: {
+                annualSavingsCzk: vsCurrentControl.annualSavingsCzk,
+                simplePaybackYears: vsCurrentControl.simplePaybackYears,
+                referenceControlMode: currentControlMode,
+              },
+              vsOptimizedControl: vsOptimizedControl
+                ? {
+                    annualSavingsCzk: vsOptimizedControl.annualSavingsCzk,
+                    simplePaybackYears: vsOptimizedControl.simplePaybackYears,
+                  }
+                : null,
+            };
+          })();
     await prisma.energyAnalysisScenario.update({
       where: { id: scenario.id },
       data: {
@@ -2285,13 +2371,77 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
     where: { id: run.userId },
     select: { email: true, name: true },
   });
-  if (user)
+  if (user) {
+    const completedScenarios = await prisma.energyAnalysisScenario.findMany({
+      where: {
+        analysisRunId: run.id,
+        status: "COMPLETED",
+        annualCostCzk: { not: null },
+      },
+      include: {
+        priceCurve: {
+          select: {
+            purpose: true,
+            distributionVersion: {
+              select: { distributionTariff: { select: { code: true } } },
+            },
+          },
+        },
+      },
+    });
+    const nested = (value: unknown) => {
+      const source = object(value as Prisma.JsonValue);
+      return typeof source.annualSavingsCzk === "number"
+        ? {
+            annualSavingsCzk: source.annualSavingsCzk,
+            simplePaybackYears:
+              typeof source.simplePaybackYears === "number"
+                ? source.simplePaybackYears
+                : null,
+          }
+        : null;
+    };
+    const mail = buildAnalysisCompletionEmail({
+      kind: run.kind === "PRO" ? "PRO" : "BASE",
+      siteName: run.energySite.name,
+      userName: user.name,
+      appUrl: process.env.APP_URL || "http://localhost:3004",
+      dataFrom: run.dataFrom,
+      dataTo: run.dataTo,
+      confidence: run.confidence,
+      currentControlMode,
+      scenarios: completedScenarios.map((scenario) => {
+        const assessment = object(
+          object(scenario.assumptions).investmentAssessment as Prisma.JsonValue,
+        );
+        return {
+          label: scenario.label,
+          controlMode: scenario.controlMode === "SMART" ? "SMART" : "SELF_USE",
+          annualCostCzk: Number(scenario.annualCostCzk),
+          currentHardware: isCurrentHardware(scenario),
+          currentTariff: scenario.priceCurve.purpose === "CURRENT_BASELINE",
+          distributionCode:
+            scenario.priceCurve.distributionVersion?.distributionTariff.code ??
+            null,
+          batteryCapacityKwh: scenario.batteryCapacityKwh,
+          pvCapacityKwp: scenario.pvCapacityKwp,
+          investment: Object.keys(assessment).length
+            ? {
+                vsCurrentControl: nested(assessment.vsCurrentControl),
+                vsOptimizedControl: nested(assessment.vsOptimizedControl),
+              }
+            : null,
+        };
+      }),
+    });
     await queueEmail({
       idempotencyKey: `energy-analysis-v2:${run.id}:completed`,
       to: user.email,
-      subject: "Nová analýza Spottex je hotová",
-      text: `Dobrý den${user.name ? ` ${user.name}` : ""},\n\nnová verzovaná analýza je hotová. Smart scénář používá produkčně ověřený rolling MILP; zobrazená úspora je modelovaný odhad podle potvrzených vstupů, naměřené historie a verzovaných cen, nikoli záruka budoucího výsledku.\n\n${process.env.APP_URL || "http://localhost:3004"}/app/analyza`,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
     });
+  }
   return true;
 }
 

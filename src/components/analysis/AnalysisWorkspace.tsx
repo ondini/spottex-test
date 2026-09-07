@@ -221,6 +221,8 @@ type Workspace = {
           effectiveInvestmentCzk: number;
           monthlyPaymentCzk: number;
           simplePaybackYears: number | null;
+          vsCurrentControl?: { annualSavingsCzk: number; simplePaybackYears: number | null } | null;
+          vsOptimizedControl?: { annualSavingsCzk: number; simplePaybackYears: number | null } | null;
         };
       }>;
     }>;
@@ -2408,8 +2410,12 @@ export function AnalysisWorkspace({
                         )}
                         {scenario.investmentAssessment.simplePaybackYears !=
                         null
-                          ? ` · návratnost ${number.format(scenario.investmentAssessment.simplePaybackYears)} roku`
-                          : " · návratnost nelze vyčíslit"}
+                          ? ` · návratnost ${number.format(scenario.investmentAssessment.simplePaybackYears)} roku proti dnešnímu provozu`
+                          : " · návratnost proti dnešnímu provozu nelze vyčíslit"}
+                        {scenario.investmentAssessment.vsOptimizedControl
+                          ?.simplePaybackYears != null
+                          ? ` · ${number.format(scenario.investmentAssessment.vsOptimizedControl.simplePaybackYears)} roku proti provozu s řízením`
+                          : ""}
                       </p>
                     )}
                   </article>
@@ -2476,7 +2482,7 @@ export function AnalysisWorkspace({
                               · HDO {String(scenario.hdoMode)}
                               {scenario.investmentAssessment
                                 ?.simplePaybackYears != null
-                                ? ` · návratnost ${number.format(scenario.investmentAssessment.simplePaybackYears)} roku`
+                                ? ` · návratnost ${number.format(scenario.investmentAssessment.simplePaybackYears)} roku proti dnešku${scenario.investmentAssessment.vsOptimizedControl?.simplePaybackYears != null ? `, ${number.format(scenario.investmentAssessment.vsOptimizedControl.simplePaybackYears)} roku proti řízení` : ""}`
                                 : ""}
                             </span>
                             <span className="mt-1 flex flex-wrap gap-1">
