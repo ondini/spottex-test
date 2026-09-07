@@ -12,6 +12,26 @@ Kontrakt na straně platformy: `src/lib/costs/catalog-sync.ts` čte
 bez DPH na ceny včetně DPH (×1,21). Platforma nikdy nedoplňuje chybějící fakta
 odhadem: co v katalogu není, do srovnání nevstoupí.
 
+## Na co se zaměřit (pořadí podle dopadu)
+
+1. **Vrátit energetické tarify do scope** (kap. 1). Bez toho platforma nedostane
+   nic, ať je katalog jakkoli úplný.
+2. **Distribuční sazby kompletně**: všechny D i C sazby pro ČEZ Distribuce,
+   EG.D a PREdistribuce, každá s úplnou tabulkou jističů do 3×160 A a
+   s **počtem hodin nízkého tarifu za den** (kap. 3 a 4). Distribuční sazba
+   dělá u řízení baterie největší rozdíl, protože určuje okna nízkého tarifu;
+   bez počtu hodin NT platforma nemůže dvoutarifovou sazbu nasimulovat.
+3. **Dodavatelské produkty pro podnikatele** (kap. 2) a u všech produktů
+   seznam sazeb, se kterými lze produkt sjednat.
+4. **POZE podle jističe** (kap. 4), aby roční náklady nebyly podhodnocené.
+5. Ověřený zdrojový dokument u každé položky; jeden průchod XLSX z ERÚ
+   pokryje všechny distribuční sazby roku 2026 (kap. 5).
+
+Stav na straně platformy k 7. 9.: C02d a dalších devět C-sazeb ČEZ (C01d,
+C03d, C25d, C26d, C27d, C35d, C45d, C46d, C56d) je doplněno ručně z výměru
+ERÚ 14/2025 jako ověřené verze, protože školky jinak neměly co porovnávat.
+Očekávaný cílový stav je, že totéž přijde z Costs a ruční verze se nahradí.
+
 ## 1. Energetické tarify jsou od 28. 8. mimo scope
 
 V Costs DB mají všechny položky `ENERGY_SUPPLY` (226) a 65 z 66 položek
@@ -52,6 +72,12 @@ Požadavek: u každé distribuční sazby (D i C) uvést všechna pásma z vým�
 `3x80`, `3x100`, `3x125`, `3x160` v Kč/měsíc bez DPH, plus dvě hodnoty pro
 odběr nad pásma: `perAmpereAbove3x160` a `perAmpereAbove1x25` v Kč/A/měsíc.
 Klíč je horní mez pásma (tak to platforma už čte).
+
+U dvoutarifových sazeb navíc uvést `lowTariffHoursPerDay` (počet hodin
+nízkého tarifu denně podle výměru: D25d/D26d/D27d/C25d/C26d/C27d 8 h,
+D35d/C35d, D45d/C45d/C46d, D56d/D57d/C56d 20 h pro rok 2026) a stručnou
+podmínku způsobilosti (akumulace, přímotop, tepelné čerpadlo, elektromobil),
+aby platforma věděla, které sazby může nabídnout jen po potvrzení zákazníkem.
 
 ## 4. Regulované složky, které se nemění se sazbou
 

@@ -36,7 +36,10 @@ export type CompletionEmailInput = {
 
 // Rates that a household can only use with a qualifying appliance; the
 // comparison shows them, but the customer has to confirm eligibility.
-const ELIGIBILITY_GATED_RATES = new Set(["D25D", "D26D", "D27D", "D35D", "D45D", "D56D", "D57D"]);
+const ELIGIBILITY_GATED_RATES = new Set([
+  "D25D", "D26D", "D27D", "D35D", "D45D", "D56D", "D57D",
+  "C25D", "C26D", "C27D", "C35D", "C45D", "C46D", "C56D",
+]);
 
 // Intl separates thousands with a non-breaking space; e-mail clients and the
 // plain-text part read better with an ordinary one.

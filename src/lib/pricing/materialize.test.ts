@@ -19,5 +19,9 @@ describe("catalog price curve materialization", () => {
     expect(tariffDailyLowHours("D25d")).toBe(8);
     expect(tariffDailyLowHours("D27d")).toBe(8);
     expect(tariffDailyLowHours("D57d")).toBe(20);
+    expect(tariffDailyLowHours("D35d")).toBe(20);
+    expect(tariffDailyLowHours("C02d")).toBe(0);
+    expect(tariffDailyLowHours("C25d")).toBe(8);
+    expect(tariffDailyLowHours("C56d")).toBe(20);
   });
 });

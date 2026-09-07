@@ -92,10 +92,18 @@ export function breakerMonthlyFee(breakerFees: Prisma.JsonValue, phases: number,
 
 export function tariffDailyLowHours(code: string | null | undefined) {
   const normalized = code?.trim().toUpperCase();
-  if (["D25D", "D26D", "D27D"].includes(normalized ?? "")) return 8;
-  if (normalized === "D35D") return 16;
-  if (["D45D", "D56D", "D57D"].includes(normalized ?? "")) return 20;
+  if (["D25D", "D26D", "D27D", "C25D", "C26D", "C27D"].includes(normalized ?? "")) return 8;
+  // ERÚ price decision 14/2025 for 2026: D35d/C35d moved to 20 hours of low
+  // tariff and D56d/C56d went from 22 to 20 hours.
+  if (["D35D", "D45D", "D56D", "D57D", "C35D", "C45D", "C46D", "C56D"].includes(normalized ?? "")) return 20;
   return 0;
+}
+
+// Distribution rates are lettered by customer category: D for households,
+// C for businesses and organisations. The customer's own rate therefore says
+// which part of the catalog can be compared for them.
+export function customerSegmentForTariffCode(code: string | null | undefined): "HOUSEHOLD" | "BUSINESS" {
+  return code?.trim().toUpperCase().startsWith("C") ? "BUSINESS" : "HOUSEHOLD";
 }
 
 function modelHdo(
@@ -265,8 +273,14 @@ export async function materializeCurrentBaselinePriceCurve(input: {
   validFrom: Date;
   validTo: Date;
   pricingAsOf?: Date;
+  // With a distribution version the curve prices the customer's own supplier
+  // product on that other rate ("keep the supplier, change the rate"); the
+  // purpose then has to be CURRENT_PRODUCT:<versionId>.
+  distributionVersionId?: number;
+  purpose?: string;
 }) {
   const pricingAsOf = input.pricingAsOf ?? new Date();
+  const purpose = input.purpose ?? "CURRENT_BASELINE";
   const site = await prisma.energySite.findUnique({
     where: { id: input.energySiteId },
     include: {
@@ -287,24 +301,40 @@ export async function materializeCurrentBaselinePriceCurve(input: {
   if (profile.buyPricingMode === "SPOT" && profile.spotBuyFeeCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_BUY_FEE_MISSING");
   if (profile.sellPricingMode === "SPOT" && profile.spotSellFeeCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_SELL_FEE_MISSING");
 
-  const candidates = await prisma.distributionTariffVersion.findMany({
-    where: {
-      status: "PUBLISHED",
-      validFrom: { lte: pricingAsOf },
-      OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }],
-      // The customer's own tariff code is authoritative: a business site on a
-      // C rate must find its published version even though the catalog's
-      // comparison set is household-only.
-      distributionTariff: { active: true, code: { equals: profile.distributionTariffCode, mode: "insensitive" } },
-    },
-    include: { distributionTariff: { include: { distributor: true } } },
-    orderBy: { validFrom: "desc" },
-  });
-  const distribution = profile.distributorCode
-    ? candidates.find((item) => item.distributionTariff.distributor.code.toUpperCase() === profile.distributorCode!.toUpperCase())
-    : candidates.length === 1 ? candidates[0] : null;
-  if (!distribution) throw new Error(candidates.length > 1 ? "PRICE_CURVE_CURRENT_DISTRIBUTION_AMBIGUOUS" : "PRICE_CURVE_CURRENT_DISTRIBUTION_NOT_PUBLISHED");
-  if (!distribution.vatIncluded) throw new Error("PRICE_CURVE_VAT_NOT_INCLUDED");
+  type DistributionWithDistributor = Prisma.DistributionTariffVersionGetPayload<{
+    include: { distributionTariff: { include: { distributor: true } } };
+  }>;
+  let distribution: DistributionWithDistributor;
+  if (input.distributionVersionId) {
+    const alternative = await prisma.distributionTariffVersion.findUnique({
+      where: { id: input.distributionVersionId },
+      include: { distributionTariff: { include: { distributor: true } } },
+    });
+    if (!alternative || alternative.status !== "PUBLISHED" || !alternative.distributionTariff.active) throw new Error("PRICE_CURVE_DISTRIBUTION_NOT_PUBLISHED");
+    if (alternative.validFrom > pricingAsOf || (alternative.validTo && alternative.validTo <= pricingAsOf)) throw new Error("PRICE_CURVE_DISTRIBUTION_NOT_CURRENT");
+    if (!alternative.vatIncluded) throw new Error("PRICE_CURVE_VAT_NOT_INCLUDED");
+    distribution = alternative;
+  } else {
+    const candidates = await prisma.distributionTariffVersion.findMany({
+      where: {
+        status: "PUBLISHED",
+        validFrom: { lte: pricingAsOf },
+        OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }],
+        // The customer's own tariff code is authoritative: a business site on a
+        // C rate must find its published version even though the catalog's
+        // comparison set is household-only.
+        distributionTariff: { active: true, code: { equals: profile.distributionTariffCode, mode: "insensitive" } },
+      },
+      include: { distributionTariff: { include: { distributor: true } } },
+      orderBy: { validFrom: "desc" },
+    });
+    const current = profile.distributorCode
+      ? candidates.find((item) => item.distributionTariff.distributor.code.toUpperCase() === profile.distributorCode!.toUpperCase())
+      : candidates.length === 1 ? candidates[0] : null;
+    if (!current) throw new Error(candidates.length > 1 ? "PRICE_CURVE_CURRENT_DISTRIBUTION_AMBIGUOUS" : "PRICE_CURVE_CURRENT_DISTRIBUTION_NOT_PUBLISHED");
+    if (!current.vatIncluded) throw new Error("PRICE_CURVE_VAT_NOT_INCLUDED");
+    distribution = current;
+  }
 
   const needsMarket = profile.buyPricingMode === "SPOT" || profile.sellPricingMode === "SPOT";
   const market = needsMarket ? await prisma.marketPriceSeries.findFirst({
@@ -314,7 +344,9 @@ export async function materializeCurrentBaselinePriceCurve(input: {
   }) : null;
   if (needsMarket && !market) throw new Error("PRICE_CURVE_MARKET_SERIES_MISSING");
 
-  const exactHdo = site.hdoCalendars[0] ?? null;
+  // The exact HDO calendar belongs to the rate the customer has today; another
+  // rate's low-tariff windows are modelled from its published daily hours.
+  const exactHdo = input.distributionVersionId ? null : (site.hdoCalendars[0] ?? null);
   const modeledLowHours = tariffDailyLowHours(
     distribution.distributionTariff.code,
   );
@@ -375,14 +407,14 @@ export async function materializeCurrentBaselinePriceCurve(input: {
     spotSellFeeCzkKwh: profile.spotSellFeeCzkKwh,
     monthlySupplierFeeCzk: profile.monthlySupplierFeeCzk,
   };
-  const fingerprint = createHash("sha256").update(JSON.stringify({ version: 1, purpose: "CURRENT_BASELINE", siteId: site.id, distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, from: input.validFrom.toISOString(), to: input.validTo.toISOString(), hdoMode, priceInput, generated })).digest("hex");
+  const fingerprint = createHash("sha256").update(JSON.stringify({ version: 1, purpose, siteId: site.id, distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, from: input.validFrom.toISOString(), to: input.validTo.toISOString(), hdoMode, priceInput, generated })).digest("hex");
   const existing = await prisma.energyPriceCurve.findUnique({ where: { fingerprint } });
   if (existing) return existing;
   return prisma.$transaction(async (tx) => {
-    await tx.energyPriceCurve.updateMany({ where: { energySiteId: site.id, purpose: "CURRENT_BASELINE", status: { in: ["DRAFT", "READY"] } }, data: { status: "SUPERSEDED" } });
-    const curve = await tx.energyPriceCurve.create({ data: { energySiteId: site.id, distributionVersionId: distribution.id, marketPriceSeriesId: market?.id, hdoCalendarId: exactHdo?.id, fingerprint, purpose: "CURRENT_BASELINE", algorithmVersion: "SPOTTEX_CURRENT_PRICE_CURVE_V1", timezone: site.timezone, resolutionMinutes: 15, validFrom: input.validFrom, validTo: input.validTo, monthlyFixedCzk: generated.monthlyFixedCzk, status: "READY", assumptions: { hdoMode, exactHdo: Boolean(exactHdo), breaker: `${profile.phases}x${profile.mainFuseA}`, vatIncluded: true, pricingAsOf: pricingAsOf.toISOString(), priceInput } } });
+    await tx.energyPriceCurve.updateMany({ where: { energySiteId: site.id, purpose, status: { in: ["DRAFT", "READY"] } }, data: { status: "SUPERSEDED" } });
+    const curve = await tx.energyPriceCurve.create({ data: { energySiteId: site.id, distributionVersionId: distribution.id, marketPriceSeriesId: market?.id, hdoCalendarId: exactHdo?.id, fingerprint, purpose, algorithmVersion: "SPOTTEX_CURRENT_PRICE_CURVE_V1", timezone: site.timezone, resolutionMinutes: 15, validFrom: input.validFrom, validTo: input.validTo, monthlyFixedCzk: generated.monthlyFixedCzk, status: "READY", assumptions: { hdoMode, exactHdo: Boolean(exactHdo), pricingMode: profile.buyPricingMode, sellPricingMode: profile.sellPricingMode, alternativeDistribution: Boolean(input.distributionVersionId), breaker: `${profile.phases}x${profile.mainFuseA}`, vatIncluded: true, pricingAsOf: pricingAsOf.toISOString(), priceInput } } });
     await tx.energyPriceCurvePoint.createMany({ data: generated.points.map((point) => ({ curveId: curve.id, ...point })) });
-    await tx.auditLog.create({ data: { actorUserId: input.actorUserId, action: "ENERGY_CURRENT_BASELINE_MATERIALIZED", entityType: "EnergyPriceCurve", entityId: curve.id, metadata: { distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, hdoMode, pointCount: generated.points.length, priceInput } } });
+    await tx.auditLog.create({ data: { actorUserId: input.actorUserId, action: purpose === "CURRENT_BASELINE" ? "ENERGY_CURRENT_BASELINE_MATERIALIZED" : "ENERGY_CURRENT_PRODUCT_CURVE_MATERIALIZED", entityType: "EnergyPriceCurve", entityId: curve.id, metadata: { distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, hdoMode, pointCount: generated.points.length, priceInput } } });
     return curve;
   }, { timeout: 60_000 });
 }
@@ -552,9 +584,10 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
     confirmedDistributorCode ||
     process.env.ANALYSIS_REFERENCE_DISTRIBUTOR_CODE ||
     "CEZ_DISTRIBUCE";
+  const segment = customerSegmentForTariffCode(site.technicalProfile.distributionTariffCode);
   const [products, distributions, latestMarket] = await Promise.all([
-    prisma.energyProductVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], product: { active: true, customerSegment: "HOUSEHOLD" } }, include: { product: { include: { supplier: true } } }, orderBy: [{ productId: "asc" }, { validFrom: "desc" }], distinct: ["productId"], take: 100 }),
-    prisma.distributionTariffVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], distributionTariff: { active: true, customerSegment: "HOUSEHOLD", distributor: { code: comparisonDistributorCode } } }, include: { distributionTariff: true }, orderBy: [{ distributionTariffId: "asc" }, { validFrom: "desc" }], distinct: ["distributionTariffId"], take: 24 }),
+    prisma.energyProductVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], product: { active: true, customerSegment: segment } }, include: { product: { include: { supplier: true } } }, orderBy: [{ productId: "asc" }, { validFrom: "desc" }], distinct: ["productId"], take: 100 }),
+    prisma.distributionTariffVersion.findMany({ where: { status: "PUBLISHED", validFrom: { lte: pricingAsOf }, OR: [{ validTo: null }, { validTo: { gt: pricingAsOf } }], distributionTariff: { active: true, customerSegment: segment, distributor: { code: comparisonDistributorCode } } }, include: { distributionTariff: true }, orderBy: [{ distributionTariffId: "asc" }, { validFrom: "desc" }], distinct: ["distributionTariffId"], take: 24 }),
     latestPublishedMarketSeries(),
   ]);
   // Spot tariffs can only be priced where the OTE series exists, so the curve
@@ -575,9 +608,11 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
   // and fallback-curve failures stay internal, so the baseline is tracked
   // separately from the combined error list.
   const currentTariffErrors: string[] = [];
+  let baselineOk = false;
   try {
     await materializeCurrentBaselinePriceCurve({ actorUserId: userId, energySiteId, validFrom, validTo, pricingAsOf });
     created += 1;
+    baselineOk = true;
   } catch (error) {
     const code = error instanceof Error ? error.message : "PRICE_CURVE_CURRENT_BASELINE_FAILED";
     errors.push(code);
@@ -600,6 +635,30 @@ export async function ensurePublishedCatalogCurvesForSite(userId: number, energy
         ? error.message
         : "PRICE_CURVE_MODELED_STANDARD_FAILED",
     );
+  }
+  // The customer's own supplier on every other published rate of their
+  // segment. Changing the distribution rate is free and, with control, often
+  // the largest lever, and this comparison must not depend on the catalog
+  // having supply products for the segment.
+  if (baselineOk) {
+    const currentCode = site.technicalProfile.distributionTariffCode?.trim().toUpperCase();
+    for (const distribution of distributions) {
+      if (distribution.distributionTariff.code.toUpperCase() === currentCode) continue;
+      try {
+        await materializeCurrentBaselinePriceCurve({
+          actorUserId: userId,
+          energySiteId,
+          validFrom,
+          validTo,
+          pricingAsOf,
+          distributionVersionId: distribution.id,
+          purpose: `CURRENT_PRODUCT:${distribution.id}`,
+        });
+        created += 1;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "PRICE_CURVE_CURRENT_PRODUCT_FAILED");
+      }
+    }
   }
   const buyProducts = products.filter(
     (product) => productDirection(product) === "BUY",
