@@ -2420,6 +2420,9 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
           annualCostCzk: Number(scenario.annualCostCzk),
           currentHardware: isCurrentHardware(scenario),
           currentTariff: scenario.priceCurve.purpose === "CURRENT_BASELINE",
+          referenceOnly:
+            scenario.priceCurve.purpose.startsWith("MODELED_STANDARD") ||
+            scenario.priceCurve.purpose.startsWith("REFERENCE_BASELINE"),
           distributionCode:
             scenario.priceCurve.distributionVersion?.distributionTariff.code ??
             null,

@@ -62,6 +62,23 @@ describe("analysis completion e-mail", () => {
     expect(mail.text).not.toContain("Dnes:");
   });
 
+  it("never presents a modelled reference tariff as the best option", () => {
+    const mail = buildAnalysisCompletionEmail({
+      ...base,
+      siteName: "MS Vetrnik",
+      kind: "BASE",
+      scenarios: [
+        scenario({ label: "Váš současný produkt · TEDOM · C02d · self-use", controlMode: "SELF_USE", currentTariff: true, distributionCode: "C02d", annualCostCzk: 36227 }),
+        scenario({ label: "Váš současný produkt · TEDOM · C02d · chytré řízení", currentTariff: true, distributionCode: "C02d", annualCostCzk: 36227 }),
+        scenario({ label: "Orientační český tarif 2026 · D02d · 3×25 A · chytré řízení", distributionCode: "D02d", referenceOnly: true, annualCostCzk: 28206 }),
+      ],
+    });
+    expect(mail.subject).toBe("Analýza MS Vetrnik: váš tarif je nejvýhodnější (36 227 Kč/rok)");
+    expect(mail.text).toContain("- Dnes: váš tarif bez řízení: 36 227 Kč/rok");
+    expect(mail.text).not.toContain("Nejvýhodnější tarif");
+    expect(mail.text).toContain("Katalog zatím nenabízí tarif");
+  });
+
   it("summarizes each hardware variant with its payback against today's plant", () => {
     const mail = buildAnalysisCompletionEmail({
       ...base,
