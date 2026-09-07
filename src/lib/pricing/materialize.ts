@@ -282,6 +282,10 @@ export async function materializeCurrentBaselinePriceCurve(input: {
   if (profile.buyPricingMode === "OTHER" || profile.sellPricingMode === "OTHER") throw new Error("PRICE_CURVE_CURRENT_PRODUCT_UNSUPPORTED");
   if (profile.buyPricingMode === "FIX" && profile.fixedBuyPriceCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_BUY_PRICE_MISSING");
   if (profile.sellPricingMode === "FIX" && profile.fixedSellPriceCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_SELL_PRICE_MISSING");
+  // Only the rule that applies has to be entered (a fixed price or a spot
+  // fee), but that one is mandatory: a missing spot fee is not a zero fee.
+  if (profile.buyPricingMode === "SPOT" && profile.spotBuyFeeCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_BUY_FEE_MISSING");
+  if (profile.sellPricingMode === "SPOT" && profile.spotSellFeeCzkKwh == null) throw new Error("PRICE_CURVE_CURRENT_SELL_FEE_MISSING");
 
   const candidates = await prisma.distributionTariffVersion.findMany({
     where: {
