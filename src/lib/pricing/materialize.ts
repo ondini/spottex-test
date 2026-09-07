@@ -165,6 +165,17 @@ function validateHdoIntervals(items: HdoValue[], from: Date, to: Date) {
   }
 }
 
+// A profile edit supersedes every curve of the site, but a curve whose
+// fingerprint still matches was built from exactly the inputs that matter
+// (window, prices, distribution version, breaker, HDO). Returning it as
+// SUPERSEDED left the site without a single READY curve until the market
+// series moved on, so an identical curve is put back into service instead.
+async function reviveIdenticalCurve<T extends { id: string; status: string }>(existing: T): Promise<T> {
+  if (existing.status === "READY") return existing;
+  const revived = await prisma.energyPriceCurve.update({ where: { id: existing.id }, data: { status: "READY" } });
+  return { ...existing, ...revived } as T;
+}
+
 export async function materializeCatalogPriceCurve(input: {
   actorUserId: number;
   energySiteId: number;
@@ -258,7 +269,7 @@ export async function materializeCatalogPriceCurve(input: {
       : "NONE:SINGLE_TARIFF";
   const fingerprint = createHash("sha256").update(JSON.stringify({ version: 3, siteId: site.id, buyProductVersionId: buyProduct.id, sellProductVersionId: sellProduct.id, distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, from: input.validFrom.toISOString(), to: input.validTo.toISOString(), hdoMode, generated })).digest("hex");
   const existing = await prisma.energyPriceCurve.findUnique({ where: { fingerprint } });
-  if (existing) return existing;
+  if (existing) return reviveIdenticalCurve(existing);
   return prisma.$transaction(async (tx) => {
     const curve = await tx.energyPriceCurve.create({ data: { energySiteId: site.id, buyProductVersionId: buyProduct.id, sellProductVersionId: sellProduct.id, distributionVersionId: distribution.id, marketPriceSeriesId: market?.id, hdoCalendarId: exactHdo?.id, fingerprint, purpose: input.purpose, algorithmVersion: "SPOTTEX_PRICE_CURVE_V2_SPLIT_BUY_SELL", timezone: site.timezone, resolutionMinutes: 15, validFrom: input.validFrom, validTo: input.validTo, monthlyFixedCzk: generated.monthlyFixedCzk, status: "READY", assumptions: { hdoMode, exactHdo: Boolean(exactHdo), breaker: `${profile.phases}x${profile.mainFuseA}`, vatIncluded: buyProduct.vatIncluded && sellProduct.vatIncluded && distribution.vatIncluded } } });
     await tx.energyPriceCurvePoint.createMany({ data: generated.points.map((point) => ({ curveId: curve.id, ...point })) });
@@ -409,7 +420,7 @@ export async function materializeCurrentBaselinePriceCurve(input: {
   };
   const fingerprint = createHash("sha256").update(JSON.stringify({ version: 1, purpose, siteId: site.id, distributionVersionId: distribution.id, marketSeriesId: market?.id ?? null, from: input.validFrom.toISOString(), to: input.validTo.toISOString(), hdoMode, priceInput, generated })).digest("hex");
   const existing = await prisma.energyPriceCurve.findUnique({ where: { fingerprint } });
-  if (existing) return existing;
+  if (existing) return reviveIdenticalCurve(existing);
   return prisma.$transaction(async (tx) => {
     await tx.energyPriceCurve.updateMany({ where: { energySiteId: site.id, purpose, status: { in: ["DRAFT", "READY"] } }, data: { status: "SUPERSEDED" } });
     const curve = await tx.energyPriceCurve.create({ data: { energySiteId: site.id, distributionVersionId: distribution.id, marketPriceSeriesId: market?.id, hdoCalendarId: exactHdo?.id, fingerprint, purpose, algorithmVersion: "SPOTTEX_CURRENT_PRICE_CURVE_V1", timezone: site.timezone, resolutionMinutes: 15, validFrom: input.validFrom, validTo: input.validTo, monthlyFixedCzk: generated.monthlyFixedCzk, status: "READY", assumptions: { hdoMode, exactHdo: Boolean(exactHdo), pricingMode: profile.buyPricingMode, sellPricingMode: profile.sellPricingMode, alternativeDistribution: Boolean(input.distributionVersionId), breaker: `${profile.phases}x${profile.mainFuseA}`, vatIncluded: true, pricingAsOf: pricingAsOf.toISOString(), priceInput } } });
@@ -493,7 +504,7 @@ export async function materializeModeledStandardPriceCurve(input: {
   const existing = await prisma.energyPriceCurve.findUnique({
     where: { fingerprint },
   });
-  if (existing) return existing;
+  if (existing) return reviveIdenticalCurve(existing);
 
   return prisma.$transaction(
     async (tx) => {
