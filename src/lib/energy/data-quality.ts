@@ -197,7 +197,15 @@ export function summarizeEnergyDataQuality(input: {
     if (error > tolerance) balanceInvalidIntervals += 1;
   }
   const balanceFailureRate = balanceEvaluatedIntervals > 0 ? balanceInvalidIntervals / balanceEvaluatedIntervals : 0;
-  const balanceCanBlock = balanceEvaluatedIntervals >= 7 * 96;
+  // The balance check exists to catch sign and unit errors in the imported
+  // history. When battery and grid exist only for a small tail of the span
+  // (the live feed started long after the cloud history), they come from a
+  // different source with different sampling than production and
+  // consumption, and a mismatch says nothing about the history's signs or
+  // units. The check can then only inform, never block.
+  const balanceCoveredIntervals = balanceEvaluatedIntervals + balanceUnmeasuredIntervals;
+  const balanceCoverage = matched.length > 0 ? balanceCoveredIntervals / matched.length : 0;
+  const balanceCanBlock = balanceEvaluatedIntervals >= 7 * 96 && balanceCoverage >= 0.5;
   const coverageWindows = ([30, 90, 365] as const).map((days) => {
     const windowStart = last - (days * 96 - 1) * 900_000;
     const count = matched.filter((timestamp) => timestamp >= windowStart && timestamp <= last).length;
