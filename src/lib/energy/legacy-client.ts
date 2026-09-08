@@ -403,6 +403,49 @@ export class LegacySpottexClient {
     return this.authenticatedCommand(endpoint, deviceId);
   }
 
+  /**
+   * Asks the legacy backend to download again the windows of the last year
+   * its SolaX history never filled. Idempotent on the backend side; the
+   * response only says whether it was queued and how much is missing.
+   */
+  async requestHistoryBackfill(deviceId: string): Promise<{ status: string; missing: string | null; gaps: string[] }> {
+    if (!this.tokens) {
+      throw new EnergyError("CONNECTION_NOT_FOUND", "Energetický účet není připojen.", 409);
+    }
+    const execute = async () => {
+      const response = await this.requestRaw("history_backfill", {
+        method: "POST",
+        body: JSON.stringify({ device_id: this.encryptString(deviceId) }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.tokens?.accessToken ?? ""}`,
+          "x-refresh-token": this.tokens?.refreshToken ?? "",
+        },
+        timeoutMs: 20_000,
+      });
+      if (!response.ok) throw new LegacyHttpError(response.status);
+      let payload: JsonObject = {};
+      try {
+        payload = asObject(await response.json());
+      } catch {
+        payload = {};
+      }
+      const gaps = Array.isArray(payload.gaps) ? payload.gaps.filter((item): item is string => typeof item === "string").slice(0, 40) : [];
+      return {
+        status: typeof payload.status === "string" ? payload.status : "unknown",
+        missing: typeof payload.missing === "string" ? payload.missing : null,
+        gaps,
+      };
+    };
+    try {
+      return await execute();
+    } catch (error) {
+      if (!(error instanceof LegacyHttpError) || error.status !== 401) throw error;
+      await this.refresh();
+      return execute();
+    }
+  }
+
   async fetchTechnicalInfo(deviceId: string): Promise<unknown> {
     return this.authenticatedEncryptedGet("inverter_user_info", deviceId);
   }

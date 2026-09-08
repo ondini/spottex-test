@@ -392,10 +392,26 @@ export async function latestHistoryImport(userId: number, siteId: number) {
 }
 
 const SPARSE_REQUEUE_MIN_AGE_MS = 24 * 60 * 60_000;
+// A plant someone looked at recently is retried every hour; after five days
+// without a visit the daily cadence returns, and after thirty days nothing
+// retries until the next visit. The user asked for exactly that shape:
+// fill the data while it matters, do not hammer the cloud for a plant no one
+// looks at.
+const RECENT_VIEW_MS = 5 * 86_400_000;
+const STALE_VIEW_MS = 30 * 86_400_000;
+const ACTIVE_RETRY_MIN_AGE_MS = 60 * 60_000;
 // Mirrors the 75% coverage threshold `readyForEstimate` requires in data-quality.
 const SPARSE_REQUEUE_COVERAGE_PERCENT = 75;
 const SPARSE_REQUEUE_LIMIT = 3;
 const SPARSE_REQUEUE_SCAN_LIMIT = 10;
+
+export function historyRetryMinAgeMs(now: Date, lastViewedAt: Date | null) {
+  if (!lastViewedAt) return SPARSE_REQUEUE_MIN_AGE_MS;
+  const sinceView = now.getTime() - lastViewedAt.getTime();
+  if (sinceView <= RECENT_VIEW_MS) return ACTIVE_RETRY_MIN_AGE_MS;
+  if (sinceView <= STALE_VIEW_MS) return SPARSE_REQUEUE_MIN_AGE_MS;
+  return Number.POSITIVE_INFINITY;
+}
 
 export function shouldRequeueSparseHistoryImport(input: {
   now: Date;
@@ -403,9 +419,10 @@ export function shouldRequeueSparseHistoryImport(input: {
   batchStatuses: string[];
   coveragePercent: number;
   coverageDays: number;
+  lastViewedAt?: Date | null;
 }) {
   return (
-    input.now.getTime() - input.latestImportCreatedAt.getTime() >= SPARSE_REQUEUE_MIN_AGE_MS &&
+    input.now.getTime() - input.latestImportCreatedAt.getTime() >= historyRetryMinAgeMs(input.now, input.lastViewedAt ?? null) &&
     input.batchStatuses.length > 0 &&
     // CANCELED is deliberately not requeued: someone stopped that batch.
     input.batchStatuses.every((status) => ["COMPLETED", "PARTIAL", "FAILED"].includes(status)) &&
@@ -420,7 +437,7 @@ export function shouldRequeueSparseHistoryImport(input: {
  * daily instead of waiting for the user to trigger it by hand.
  */
 export async function requeueSparseHistoryImports(now = new Date()) {
-  const staleBefore = new Date(now.getTime() - SPARSE_REQUEUE_MIN_AGE_MS);
+  const staleBefore = new Date(now.getTime() - ACTIVE_RETRY_MIN_AGE_MS);
   const sites = await prisma.energySite.findMany({
     where: {
       provider: EnergyProvider.LEGACY_SPOTTEX,
@@ -429,7 +446,7 @@ export async function requeueSparseHistoryImports(now = new Date()) {
         none: { OR: [{ status: { in: ["QUEUED", "RUNNING"] } }, { createdAt: { gt: staleBefore } }] },
       },
     },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, metadata: true },
     orderBy: { id: "asc" },
     take: SPARSE_REQUEUE_SCAN_LIMIT,
   });
@@ -456,8 +473,15 @@ export async function requeueSparseHistoryImports(now = new Date()) {
         batchStatuses: batch.map((item) => item.status),
         coveragePercent: quality.coveragePercent,
         coverageDays: quality.coverageDays,
+        lastViewedAt: siteLastViewedAt(site.metadata),
       });
       if (!eligible) continue;
+      try {
+        // Best effort: the backend backfill must never stop the platform's own import.
+        await requestBackendHistoryBackfill(site.userId, site.id, "SCHEDULE");
+      } catch {
+        /* reported through the audit log when it runs, ignored here */
+      }
       await requestHistoryImport(site.userId, site.id);
       requeued += 1;
     } catch {
@@ -466,3 +490,70 @@ export async function requeueSparseHistoryImports(now = new Date()) {
   }
   return { checked, requeued };
 }
+
+function siteLastViewedAt(metadata: unknown): Date | null {
+  const value = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>).lastViewedAt : null;
+  const parsed = typeof value === "string" ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+/** Remembers that the owner looked at the plant, which drives the retry cadence. */
+export async function markSiteViewed(userId: number, siteId: number, now = new Date()) {
+  const site = await prisma.energySite.findFirst({ where: { id: siteId, userId }, select: { id: true, metadata: true } });
+  if (!site) return;
+  const metadata = site.metadata && typeof site.metadata === "object" && !Array.isArray(site.metadata) ? (site.metadata as Record<string, unknown>) : {};
+  await prisma.energySite.update({ where: { id: site.id }, data: { metadata: { ...metadata, lastViewedAt: now.toISOString() } } });
+}
+
+/**
+ * Asks the legacy backend to download the windows its SolaX history never
+ * filled. Best effort: the backend may be unreachable or the process may lack
+ * the legacy credentials, and neither must stop the platform's own import.
+ */
+export async function requestBackendHistoryBackfill(userId: number, siteId: number, trigger: "VISIT" | "SCHEDULE" | "MANUAL") {
+  const site = await prisma.energySite.findFirst({ where: { id: siteId, userId, provider: EnergyProvider.LEGACY_SPOTTEX }, include: { inverters: { orderBy: { id: "asc" } } } });
+  if (!site || !LegacySpottexClient.isConfigured()) return { requested: 0, results: [] as Array<{ inverterId: number; status: string }> };
+  const connection = await prisma.energyConnection.findUnique({ where: { userId_provider: { userId, provider: EnergyProvider.LEGACY_SPOTTEX } } });
+  if (!connection?.encryptedAccessToken || !connection.encryptedRefreshToken) return { requested: 0, results: [] };
+  const before = { accessToken: decryptSecret(connection.encryptedAccessToken), refreshToken: decryptSecret(connection.encryptedRefreshToken) };
+  const client = new LegacySpottexClient({ tokens: before });
+  const results: Array<{ inverterId: number; status: string }> = [];
+  for (const inverter of site.inverters) {
+    try {
+      const result = await client.requestHistoryBackfill(inverter.externalDeviceId);
+      results.push({ inverterId: inverter.id, status: result.status });
+    } catch (error) {
+      results.push({ inverterId: inverter.id, status: error instanceof Error ? error.message.slice(0, 120) : "FAILED" });
+    }
+  }
+  const after = client.getTokens();
+  if (after && (after.accessToken !== before.accessToken || after.refreshToken !== before.refreshToken)) {
+    await prisma.energyConnection.update({ where: { id: connection.id }, data: { encryptedAccessToken: encryptSecret(after.accessToken), encryptedRefreshToken: encryptSecret(after.refreshToken), tokenExpiresAt: accessTokenExpiresAt(after.accessToken) } });
+  }
+  await prisma.auditLog.create({ data: { actorUserId: userId, action: "ENERGY_HISTORY_BACKFILL_REQUESTED", entityType: "EnergySite", entityId: String(site.id), metadata: { trigger, results } } });
+  return { requested: results.filter((item) => item.status === "queued").length, results };
+}
+
+/**
+ * What a visit does about sparse history: nothing while an import runs or
+ * one finished less than an hour ago, otherwise ask the backend to backfill
+ * its gaps and import again. Returns what happened so the page can say it.
+ */
+export async function refreshSiteHistoryIfSparse(userId: number, siteId: number, trigger: "VISIT" | "SCHEDULE" | "MANUAL", now = new Date()) {
+  const site = await prisma.energySite.findFirst({ where: { id: siteId, userId, provider: EnergyProvider.LEGACY_SPOTTEX }, select: { id: true } });
+  if (!site) return { status: "NOT_APPLICABLE" as const };
+  const quality = await getEnergyDataQuality(userId, siteId);
+  if (quality.coverageDays >= 1 && quality.coveragePercent >= SPARSE_REQUEUE_COVERAGE_PERCENT) return { status: "COMPLETE" as const };
+  const latest = await prisma.energyHistoryImport.findFirst({ where: { energySiteId: siteId }, orderBy: { createdAt: "desc" }, select: { status: true, createdAt: true } });
+  if (latest && ["QUEUED", "RUNNING"].includes(latest.status)) return { status: "RUNNING" as const };
+  if (latest && trigger !== "MANUAL" && now.getTime() - latest.createdAt.getTime() < ACTIVE_RETRY_MIN_AGE_MS) return { status: "RECENT" as const };
+  let backfillRequested = 0;
+  try {
+    backfillRequested = (await requestBackendHistoryBackfill(userId, siteId, trigger)).requested;
+  } catch {
+    /* best effort */
+  }
+  await requestHistoryImport(userId, siteId);
+  return { status: "REQUESTED" as const, backfillRequested };
+}
+
