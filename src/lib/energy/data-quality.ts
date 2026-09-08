@@ -29,6 +29,7 @@ export type EnergyDataQuality = {
   invalidDurationIntervals: number;
   balanceEvaluatedIntervals: number;
   balanceInvalidIntervals: number;
+  balanceUnmeasuredIntervals: number;
   balanceMeanAbsoluteErrorKwh: number | null;
   measuredConsumptionKwh: number;
   measuredProductionKwh: number;
@@ -108,6 +109,7 @@ export function summarizeEnergyDataQuality(input: {
       invalidDurationIntervals: 0,
       balanceEvaluatedIntervals: 0,
       balanceInvalidIntervals: 0,
+      balanceUnmeasuredIntervals: 0,
       balanceMeanAbsoluteErrorKwh: null,
       measuredConsumptionKwh: 0,
       measuredProductionKwh: 0,
@@ -168,6 +170,7 @@ export function summarizeEnergyDataQuality(input: {
   );
   let balanceEvaluatedIntervals = 0;
   let balanceInvalidIntervals = 0;
+  let balanceUnmeasuredIntervals = 0;
   let balanceAbsoluteError = 0;
   for (const timestamp of matched) {
     const productionKwh = production.get(timestamp)?.kwh;
@@ -181,6 +184,14 @@ export function summarizeEnergyDataQuality(input: {
     const demand = consumptionKwh! + exportKwh! + Math.max(0, -batteryKwh!);
     const error = Math.abs(supply - demand);
     const tolerance = Math.max(0.05, Math.max(supply, demand) * 0.05);
+    // Battery, import and export all exactly zero while production and
+    // consumption differ is the signature of a gap in the live feed that the
+    // legacy series filled with zeros, not of a sign or unit error. Such
+    // windows are counted separately and never fail the balance check.
+    if (batteryKwh === 0 && importKwh === 0 && exportKwh === 0 && Math.abs(productionKwh! - consumptionKwh!) > tolerance) {
+      balanceUnmeasuredIntervals += 1;
+      continue;
+    }
     balanceEvaluatedIntervals += 1;
     balanceAbsoluteError += error;
     if (error > tolerance) balanceInvalidIntervals += 1;
@@ -221,6 +232,7 @@ export function summarizeEnergyDataQuality(input: {
     invalidDurationIntervals,
     balanceEvaluatedIntervals,
     balanceInvalidIntervals,
+    balanceUnmeasuredIntervals,
     balanceMeanAbsoluteErrorKwh: balanceEvaluatedIntervals > 0 ? Math.round(balanceAbsoluteError / balanceEvaluatedIntervals * 10_000) / 10_000 : null,
     measuredConsumptionKwh: Math.round(measuredConsumptionKwh * 10) / 10,
     measuredProductionKwh: Math.round(measuredProductionKwh * 10) / 10,
