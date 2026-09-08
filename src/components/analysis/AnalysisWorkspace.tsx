@@ -97,7 +97,9 @@ type Workspace = {
       lastAttempt: { at: string; outcome: string; succeededChunks: number; failedChunks: number; totalChunks: number; error: string | null } | null;
       nextAutomaticAt: string | null;
       canRetryNow: boolean;
+      closed: { at: string; unavailableMonths: string[] } | null;
     } | null;
+    period: { annual: boolean; label: string; consumptionKwh: number | null; productionKwh: number | null; days: number | null };
     ready: boolean;
     blockers: string[];
     priceCurveWarnings: string[];
@@ -153,6 +155,7 @@ type Workspace = {
       completedAt: string | null;
       dataFrom: string | null;
       dataTo: string | null;
+      period: { annual: boolean; label: string; evaluatedDays: number; factor: number };
       errorMessage: string | null;
       proPriceMinor: number;
       billablePointCount: number;
@@ -948,13 +951,13 @@ export function AnalysisWorkspace({
         site.dataQuality.coverageDays,
     ),
   );
-  const effectivelyAnnual = evaluatedDays >= 360;
+  // Exact figures: below ten months the run covers whole calendar months and
+  // every amount is shown for that period, never scaled to a year.
+  const effectivelyAnnual = latest?.period ? latest.period.annual : evaluatedDays >= 300;
   const amountPeriodLabel = effectivelyAnnual
     ? "rok"
-    : completeDaysLabel(evaluatedDays);
-  const amountLabel = effectivelyAnnual
-    ? "za rok"
-    : `za ${completeDaysLabel(evaluatedDays)}`;
+    : (latest?.period?.label ?? completeDaysLabel(evaluatedDays));
+  const amountLabel = effectivelyAnnual ? "za rok" : `za ${amountPeriodLabel}`;
   const displayedAmount = (annualValue: number | null) =>
     amountForEvaluatedPeriod(annualValue, evaluatedDays);
   const savingsValue = (
@@ -1120,7 +1123,7 @@ export function AnalysisWorkspace({
   const baseMatrixScenario = (row: (typeof matrixRows)[number]) =>
     controlMode === "SMART" ? row.smart : row.selfUse;
   const baseMatrixCosts = comparisonMatrixRows
-    .map((row) => baseMatrixScenario(row)?.annualCostCzk)
+    .map((row) => displayedAmount(baseMatrixScenario(row)?.annualCostCzk ?? null))
     .filter((value): value is number => value != null);
   const baseMatrixLowestCost =
     baseMatrixCosts.length > 0 ? Math.min(...baseMatrixCosts) : null;
@@ -1274,12 +1277,18 @@ export function AnalysisWorkspace({
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-950">
               {number.format(
-                site.dataQuality.annualizedConsumptionKwh / 1_000,
+                (site.period.annual || site.period.consumptionKwh == null
+                  ? site.dataQuality.annualizedConsumptionKwh
+                  : site.period.consumptionKwh) / 1_000,
               )}{" "}
-              <span className="text-sm font-medium text-slate-500">MWh/rok</span>
+              <span className="text-sm font-medium text-slate-500">
+                {site.period.annual || site.period.consumptionKwh == null ? "MWh/rok" : `MWh za ${site.period.label}`}
+              </span>
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Přepočteno z měřeného období
+              {site.period.annual || site.period.consumptionKwh == null
+                ? "Přepočteno z měřeného období"
+                : "Naměřeno, bez přepočtu na rok"}
             </p>
           </div>
           <div className="pt-4 sm:pl-5 sm:pt-0">
@@ -1288,12 +1297,18 @@ export function AnalysisWorkspace({
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-950">
               {number.format(
-                site.dataQuality.annualizedProductionKwh / 1_000,
+                (site.period.annual || site.period.productionKwh == null
+                  ? site.dataQuality.annualizedProductionKwh
+                  : site.period.productionKwh) / 1_000,
               )}{" "}
-              <span className="text-sm font-medium text-slate-500">MWh/rok</span>
+              <span className="text-sm font-medium text-slate-500">
+                {site.period.annual || site.period.productionKwh == null ? "MWh/rok" : `MWh za ${site.period.label}`}
+              </span>
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Přepočteno z měřeného období
+              {site.period.annual || site.period.productionKwh == null
+                ? "Přepočteno z měřeného období"
+                : "Naměřeno, bez přepočtu na rok"}
             </p>
           </div>
           <button
@@ -1356,6 +1371,12 @@ export function AnalysisWorkspace({
                 <span className="text-xs text-slate-600">
                   {site.historyStatus.progress.doneChunks} z {site.historyStatus.progress.totalChunks} období
                 </span>
+              ) : site.historyStatus.closed ? (
+                <span className="text-xs text-slate-600">
+                  {site.historyStatus.closed.unavailableMonths.length > 0
+                    ? `cloud výrobce nemá data za ${site.historyStatus.closed.unavailableMonths.join(", ")}`
+                    : "cloud výrobce víc dat nemá"}
+                </span>
               ) : site.historyStatus.missingMonths.length > 0 ? (
                 <span className="text-xs text-slate-600">
                   chybí {site.historyStatus.missingMonths.join(", ")}
@@ -1367,7 +1388,9 @@ export function AnalysisWorkspace({
                     podrobnosti
                   </summary>
                   <div className="absolute right-0 z-20 mt-1 w-80 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg">
-                    Chybějící období stahujeme znovu sami: každou hodinu, dokud se sem vracíte, jinak jednou denně. Některá období cloud výrobce nemusí mít vůbec.
+                    {site.historyStatus.closed
+                      ? "Stahování proběhlo správně a cloud výrobce pro zbývající období žádná data nemá. Další automatické pokusy neplánujeme; kdykoli to můžete zkontrolovat znovu."
+                      : "Chybějící období stahujeme znovu sami: každou hodinu, dokud se sem vracíte, jinak jednou denně. Pokud stahování selže, dozví se to správce a zkoušíme to dál."}
                     {site.historyStatus.lastAttempt && (
                       <>
                         {" "}Poslední pokus{" "}
@@ -1402,7 +1425,7 @@ export function AnalysisWorkspace({
                   ) : (
                     <CloudDownload className="size-3.5" />
                   )}
-                  {site.historyStatus.running ? "Stahuje se" : "Stáhnout znovu"}
+                  {site.historyStatus.running ? "Stahuje se" : site.historyStatus.closed ? "Zkontrolovat znovu" : "Stáhnout znovu"}
                 </button>
               </span>
             </div>
@@ -1757,7 +1780,9 @@ export function AnalysisWorkspace({
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="font-semibold text-slate-950">
-                  Roční náklady na energii
+                  {effectivelyAnnual
+                    ? "Roční náklady na energii"
+                    : `Náklady na energii za ${amountPeriodLabel}`}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
                   Kliknutím na částku otevřete kompletní ceník a výpočet.
@@ -1850,7 +1875,7 @@ export function AnalysisWorkspace({
                             productKey(candidate) === combination.key,
                         );
                         const scenario = row ? baseMatrixScenario(row) : null;
-                        const cost = scenario?.annualCostCzk ?? null;
+                        const cost = displayedAmount(scenario?.annualCostCzk ?? null);
                         const best =
                           cost != null && cost === baseMatrixLowestCost;
                         const worst =

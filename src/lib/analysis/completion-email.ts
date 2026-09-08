@@ -32,6 +32,10 @@ export type CompletionEmailInput = {
   confidence: string | null;
   currentControlMode: "SELF_USE" | "SMART";
   scenarios: CompletionEmailScenario[];
+  // Exact figures: with less than ten months of data the mail reports the
+  // measured period, not a year; `factor` converts the engine's annualized
+  // amounts back to that period.
+  period?: { annual: boolean; label: string; factor: number };
 };
 
 // Rates that a household can only use with a qualifying appliance; the
@@ -50,6 +54,11 @@ const date = new Intl.DateTimeFormat("cs-CZ", { day: "numeric", month: "numeric"
 
 export function formatCzkPerYear(value: number) {
   return `${czk.format(Math.round(value))} Kč/rok`;
+}
+
+function amountFormatter(period: CompletionEmailInput["period"]) {
+  if (!period || period.annual) return formatCzkPerYear;
+  return (value: number) => `${czk.format(Math.round(value * period.factor))} Kč za ${period.label}`;
 }
 
 function tariffName(label: string) {
@@ -93,10 +102,12 @@ function baseRows(input: CompletionEmailInput) {
     item?.distributionCode && ELIGIBILITY_GATED_RATES.has(item.distributionCode.toUpperCase())
       ? `sazba ${item.distributionCode} vyžaduje způsobilost (tepelné čerpadlo nebo akumulační vytápění)`
       : null;
+  const factor = input.period && !input.period.annual ? input.period.factor : 1;
+  const unit = input.period && !input.period.annual ? `Kč za ${input.period.label}` : "Kč/rok";
   const saving = (item: CompletionEmailScenario | null) => {
     if (!item || !today || today === item) return null;
-    const delta = Math.round(today.annualCostCzk - item.annualCostCzk);
-    return delta >= 0 ? `úspora ${czk.format(delta)} Kč/rok` : `o ${czk.format(-delta)} Kč/rok dráž než dnes`;
+    const delta = Math.round((today.annualCostCzk - item.annualCostCzk) * factor);
+    return delta >= 0 ? `úspora ${czk.format(delta)} ${unit}` : `o ${czk.format(-delta)} ${unit} dráž než dnes`;
   };
   const rows: Row[] = [];
   if (today) rows.push({ title: `Dnes: váš tarif ${controlName(input.currentControlMode)}`, detail: tariffName(today.label), cost: today.annualCostCzk, note: null, highlight: true });
@@ -119,8 +130,9 @@ function proRows(input: CompletionEmailInput) {
   for (const items of variants.values()) {
     const best = cheapest(items.filter((item) => !item.referenceOnly)) ?? cheapest(items);
     if (!best) continue;
-    const payback = best.investment?.vsCurrentControl;
-    const optimized = best.investment?.vsOptimizedControl;
+    const annual = !input.period || input.period.annual;
+    const payback = annual ? best.investment?.vsCurrentControl : null;
+    const optimized = annual ? best.investment?.vsOptimizedControl : null;
     const parts = [
       payback ? `proti dnešku úspora ${czk.format(Math.round(payback.annualSavingsCzk))} Kč/rok` : null,
       payback?.simplePaybackYears != null ? `návratnost ${oneDecimal.format(payback.simplePaybackYears)} let` : null,
@@ -138,6 +150,7 @@ function proRows(input: CompletionEmailInput) {
 }
 
 export function buildAnalysisCompletionEmail(input: CompletionEmailInput) {
+  const formatAmount = amountFormatter(input.period);
   const greeting = `Dobrý den${input.userName ? ` ${input.userName}` : ""},`;
   const window =
     input.dataFrom && input.dataTo ? `${date.format(input.dataFrom)} – ${date.format(input.dataTo)}` : null;
@@ -149,17 +162,21 @@ export function buildAnalysisCompletionEmail(input: CompletionEmailInput) {
     input.kind === "PRO"
       ? `Rozšířená analýza ${input.siteName} je hotová`
       : base.today && base.best && base.best.annualCostCzk < base.today.annualCostCzk - 1
-        ? `Analýza ${input.siteName}: dnes ${formatCzkPerYear(base.today.annualCostCzk)}, nejvýhodnější varianta ${formatCzkPerYear(base.best.annualCostCzk)}`
+        ? `Analýza ${input.siteName}: dnes ${formatAmount(base.today.annualCostCzk)}, nejvýhodnější varianta ${formatAmount(base.best.annualCostCzk)}`
         : base.today
-          ? `Analýza ${input.siteName}: váš tarif je nejvýhodnější (${formatCzkPerYear(base.today.annualCostCzk)})`
+          ? `Analýza ${input.siteName}: váš tarif je nejvýhodnější (${formatAmount(base.today.annualCostCzk)})`
           : base.best
-            ? `Analýza ${input.siteName}: nejvýhodnější varianta ${formatCzkPerYear(base.best.annualCostCzk)}`
+            ? `Analýza ${input.siteName}: nejvýhodnější varianta ${formatAmount(base.best.annualCostCzk)}`
             : `Analýza ${input.siteName} je hotová`;
   const intro =
     input.kind === "PRO"
-      ? `rozšířená analýza elektrárny ${input.siteName} s variantami hardwaru je hotová. U každé varianty uvádíme nejlevnější tarif a návratnost investice proti dnešnímu provozu.`
+      ? `rozšířená analýza elektrárny ${input.siteName} s variantami hardwaru je hotová. ${input.period && !input.period.annual ? "U každé varianty uvádíme nejlevnější tarif; návratnost investice spočítáme, až bude k dispozici aspoň deset měsíců měření." : "U každé varianty uvádíme nejlevnější tarif a návratnost investice proti dnešnímu provozu."}`
       : `analýza elektrárny ${input.siteName} je hotová. Porovnali jsme váš současný tarif s dostupnými nákupními i výkupními produkty a distribučními sazbami, bez řízení i s chytrým řízením baterie.`;
-  const context = [window ? `Období měření ${window}.` : null, confidence ? `Spolehlivost odhadu: ${confidence}.` : null]
+  const context = [
+    window ? `Období měření ${window}.` : null,
+    input.period && !input.period.annual ? `Částky jsou za ${input.period.label}, na rok je nepřepočítáváme, protože měření nepokrývá aspoň deset měsíců.` : null,
+    confidence ? `Spolehlivost odhadu: ${confidence}.` : null,
+  ]
     .filter(Boolean)
     .join(" ");
   const missingTariff =
@@ -174,7 +191,7 @@ export function buildAnalysisCompletionEmail(input: CompletionEmailInput) {
     "Jde o modelovaný odhad z vaší naměřené historie a verzovaných ceníků, ne o záruku budoucího výsledku.";
 
   const textRows = rows
-    .map((row) => `- ${row.title}: ${row.cost == null ? "—" : formatCzkPerYear(row.cost)}${row.detail ? ` — ${row.detail}` : ""}${row.note ? ` (${row.note})` : ""}`)
+    .map((row) => `- ${row.title}: ${row.cost == null ? "—" : formatAmount(row.cost)}${row.detail ? ` — ${row.detail}` : ""}${row.note ? ` (${row.note})` : ""}`)
     .join("\n");
   const text = [
     greeting,
@@ -182,7 +199,7 @@ export function buildAnalysisCompletionEmail(input: CompletionEmailInput) {
     intro,
     context,
     "",
-    "Roční náklady na elektřinu (odhad modelu):",
+    input.period && !input.period.annual ? `Náklady na elektřinu za ${input.period.label} (odhad modelu):` : "Roční náklady na elektřinu (odhad modelu):",
     textRows || "- žádný scénář nebylo možné spočítat",
     "",
     missingTariff,
@@ -197,7 +214,7 @@ export function buildAnalysisCompletionEmail(input: CompletionEmailInput) {
   const htmlRows = rows
     .map(
       (row) =>
-        `<tr${row.highlight ? ' style="background:#eef2ff"' : ""}><td style="padding:8px 10px;border-top:1px solid #e2e8f0"><strong>${escapeHtml(row.title)}</strong>${row.detail ? `<br><span style="color:#475569;font-size:13px">${escapeHtml(row.detail)}</span>` : ""}${row.note ? `<br><span style="color:#475569;font-size:13px">${escapeHtml(row.note)}</span>` : ""}</td><td style="padding:8px 10px;border-top:1px solid #e2e8f0;text-align:right;white-space:nowrap">${row.cost == null ? "—" : escapeHtml(formatCzkPerYear(row.cost))}</td></tr>`,
+        `<tr${row.highlight ? ' style="background:#eef2ff"' : ""}><td style="padding:8px 10px;border-top:1px solid #e2e8f0"><strong>${escapeHtml(row.title)}</strong>${row.detail ? `<br><span style="color:#475569;font-size:13px">${escapeHtml(row.detail)}</span>` : ""}${row.note ? `<br><span style="color:#475569;font-size:13px">${escapeHtml(row.note)}</span>` : ""}</td><td style="padding:8px 10px;border-top:1px solid #e2e8f0;text-align:right;white-space:nowrap">${row.cost == null ? "—" : escapeHtml(formatAmount(row.cost))}</td></tr>`,
     )
     .join("");
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#0f172a;max-width:640px">

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { apiUser } from "@/lib/auth/guards";
-import { latestHistoryImport, requestHistoryImport } from "@/lib/energy/history-import";
+import { latestHistoryImport, refreshSiteHistoryIfSparse, requestHistoryImport } from "@/lib/energy/history-import";
 import { energyErrorResponse, noStoreJson } from "@/lib/energy/http";
 import { consumeRateLimit } from "@/lib/security/rate-limit";
 
@@ -31,7 +31,15 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const rate = await consumeRateLimit(request, { scope: "energy-history-import", identity: `${userId}:${siteId.data}`, includeAddress: false, limit: 3, windowMs: 60 * 60_000 });
   if (!rate.allowed) return noStoreJson({ error: "Import lze spustit nejvýše třikrát za hodinu." }, { status: 429 });
   try {
-    return noStoreJson({ historyImport: await requestHistoryImport(userId, siteId.data, input.data.days) }, { status: 202 });
+    // A manual request asks the backend for its gaps again (and re-evaluates
+    // whether the cloud has anything more) before importing; when that path
+    // does not import on its own, import the requested range directly.
+    const refreshed = await refreshSiteHistoryIfSparse(userId, siteId.data, "MANUAL");
+    const historyImport =
+      refreshed.status === "REQUESTED"
+        ? await latestHistoryImport(userId, siteId.data)
+        : await requestHistoryImport(userId, siteId.data, input.data.days);
+    return noStoreJson({ historyImport, closed: refreshed.status === "REQUESTED" ? refreshed.closed : false }, { status: 202 });
   } catch (error) {
     return energyErrorResponse(error);
   }
