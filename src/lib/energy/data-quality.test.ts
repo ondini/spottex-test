@@ -109,6 +109,20 @@ describe("energy data quality", () => {
     expect(quality.readyForEstimate).toBe(true);
   });
 
+  it("only informs, never blocks, when battery and grid cover a small tail of a long history", () => {
+    // A year of cloud history for production and consumption, battery and
+    // grid only from the live feed of the last ten days, sampled differently:
+    // the mismatch is not evidence about the history's signs or units.
+    const span = 96 * 60;
+    const production = intervals(span).map((item) => ({ ...item, kwh: 1 }));
+    const consumption = intervals(span).map((item) => ({ ...item, kwh: 0.5 }));
+    const tail = (kwh: number) => intervals(span).slice(span - 96 * 10).map((item) => ({ ...item, kwh }));
+    const quality = summarizeEnergyDataQuality({ production, consumption, battery: tail(0), gridImport: tail(0), gridExport: tail(0.1), minimumDays: 7 });
+    expect(quality.balanceEvaluatedIntervals).toBe(960);
+    expect(quality.balanceInvalidIntervals).toBe(960);
+    expect(quality.readyForEstimate).toBe(true);
+  });
+
   it("opens the estimate on recent complete days even when the whole span is sparse", () => {
     const now = new Date("2026-09-06T00:00:00.000Z");
     const day = 86_400_000;
