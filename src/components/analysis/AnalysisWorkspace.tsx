@@ -1782,7 +1782,7 @@ export function AnalysisWorkspace({
                 <h2 className="font-semibold text-slate-950">
                   {effectivelyAnnual
                     ? "Roční náklady na energii"
-                    : `Náklady na energii za ${amountPeriodLabel}`}
+                    : `Náklady na energii za ${amountPeriodLabel} (naměřeno ${number.format(Math.round(evaluatedDays))} dní)`}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
                   Kliknutím na částku otevřete kompletní ceník a výpočet.

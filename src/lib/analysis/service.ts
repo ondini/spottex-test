@@ -1541,6 +1541,13 @@ async function loadDispatchPoints(
 ) {
   if (!run.dataFrom || !run.dataTo || !run.energySite.inverters.length)
     throw new Error("ANALYSIS_WINDOW_MISSING");
+  const dataFrom = run.dataFrom;
+  // The forecast learns from the 28 days before each interval, so the run
+  // loads that much history ahead of its window and evaluates the window
+  // itself in full: the pre-window points are the warm-up, nothing else is.
+  const warmupFrom = new Date(
+    dataFrom.getTime() - ANALYSIS_FORECAST_WARMUP_DAYS * 86_400_000,
+  );
   const [intervals, prices, curve] = await Promise.all([
     prisma.energyInterval.findMany({
       where: {
@@ -1555,12 +1562,12 @@ async function loadDispatchPoints(
             EnergyIntervalKind.GRID_EXPORT,
           ],
         },
-        startAt: { gte: run.dataFrom, lt: run.dataTo },
+        startAt: { gte: warmupFrom, lt: run.dataTo },
       },
       orderBy: [{ startAt: "asc" }, { kind: "asc" }],
     }),
     prisma.energyPriceCurvePoint.findMany({
-      where: { curveId, startAt: { gte: run.dataFrom, lt: run.dataTo } },
+      where: { curveId, startAt: { gte: warmupFrom, lt: run.dataTo } },
       orderBy: { startAt: "asc" },
     }),
     prisma.energyPriceCurve.findUnique({
@@ -1596,6 +1603,9 @@ async function loadDispatchPoints(
       ];
     },
   );
+  const warmupIntervals = model.filter(
+    (point) => point.startAt.getTime() < dataFrom.getTime(),
+  ).length;
   const forecastSelection = selectForecastPolicy(
     model,
     run.energySite.timezone,
@@ -1609,6 +1619,7 @@ async function loadDispatchPoints(
       allNt: null,
       loadProfile: loadProfile.provenance,
       forecastSelection,
+      warmupIntervals,
     };
   const currentPrice = object(
     (curveAssumptions.priceInput ?? {}) as Prisma.JsonValue,
@@ -1651,6 +1662,7 @@ async function loadDispatchPoints(
     allNt: applyHdoExtreme(model, definition, true),
     loadProfile: loadProfile.provenance,
     forecastSelection,
+    warmupIntervals,
   };
 }
 
@@ -1898,10 +1910,17 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
         profile.exportAllowed ??
         (scenario.maxGridOutputKw != null && scenario.maxGridOutputKw > 0),
     };
+    // Warm-up is the history loaded ahead of the window. Only an annual run
+    // without any such history still sacrifices its first 28 days; a
+    // whole-month run evaluates every labelled day, cold start included.
+    const inWindowIntervals = scenarioPoints.length - pointBundle.warmupIntervals;
     const warmupIntervals =
-      scenarioPoints.length >= ANALYSIS_FORECAST_WARMUP_DAYS * 2 * 96
-        ? ANALYSIS_FORECAST_WARMUP_DAYS * 96
-        : 0;
+      pointBundle.warmupIntervals > 0
+        ? pointBundle.warmupIntervals
+        : inWindowIntervals >= ANNUAL_MINIMUM_DAYS * 96 &&
+            scenarioPoints.length >= ANALYSIS_FORECAST_WARMUP_DAYS * 2 * 96
+          ? ANALYSIS_FORECAST_WARMUP_DAYS * 96
+          : 0;
     const evaluatedIntervals = scenarioPoints.length - warmupIntervals;
     if (evaluatedIntervals < 24)
       throw new Error("ANALYSIS_EVALUATION_COVERAGE_INSUFFICIENT");
