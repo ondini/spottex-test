@@ -60,4 +60,27 @@ describe("evaluation window", () => {
     expect(window.to.toISOString()).toBe("2026-08-31T22:00:00.000Z");
     expect(evaluationPeriodLabel({ annual: false, from: window.from, to: window.to })).toBe("červen–srpen 2026");
   });
+
+  it("takes the longest unbroken block of complete months, not the span between the first and the last", () => {
+    const window = chooseEvaluationWindow({
+      window: { from: new Date("2025-10-24T10:45:00Z"), to: new Date("2026-09-08T11:45:00Z") },
+      coverageDays: 256,
+      monthlyCoverage: [
+        { month: "2025-10", coveragePercent: 93.2 },
+        { month: "2025-11", coveragePercent: 56.9 },
+        { month: "2025-12", coveragePercent: 51.5 },
+        { month: "2026-01", coveragePercent: 48.5 },
+        { month: "2026-02", coveragePercent: 83.3 },
+        { month: "2026-03", coveragePercent: 78.6 },
+        { month: "2026-04", coveragePercent: 91.4 },
+        { month: "2026-05", coveragePercent: 99.8 },
+        { month: "2026-06", coveragePercent: 99.8 },
+        { month: "2026-07", coveragePercent: 99.8 },
+        { month: "2026-08", coveragePercent: 86.8 },
+        { month: "2026-09", coveragePercent: 97.7 },
+      ],
+    });
+    expect(window.months).toEqual(["2026-04", "2026-05", "2026-06", "2026-07"]);
+    expect(evaluationPeriodLabel({ annual: false, from: window.from, to: window.to })).toBe("duben–červenec 2026");
+  });
 });

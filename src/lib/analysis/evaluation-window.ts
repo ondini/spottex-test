@@ -52,14 +52,34 @@ export function chooseEvaluationWindow(input: {
   if (!complete.length) {
     return { from: input.window.from, to: input.window.to, annual: false, months: [] };
   }
-  const [firstYear, firstMonth] = complete[0].split("-").map(Number);
-  const [lastYear, lastMonth] = complete[complete.length - 1].split("-").map(Number);
+  // Only whole months, and only months that sit next to each other: the
+  // longest unbroken block wins (the most recent one on a tie), so a complete
+  // October cannot drag a half-measured winter into a spring-to-summer window.
+  const block = longestConsecutiveBlock(complete);
+  const [firstYear, firstMonth] = block[0].split("-").map(Number);
+  const [lastYear, lastMonth] = block[block.length - 1].split("-").map(Number);
   const from = new Date(Math.max(input.window.from.getTime(), pragueMonthStart(firstYear, firstMonth).getTime()));
   const to = new Date(Math.min(input.window.to.getTime(), pragueMonthStart(lastMonth === 12 ? lastYear + 1 : lastYear, lastMonth === 12 ? 1 : lastMonth + 1).getTime()));
   if (to <= from) {
     return { from: input.window.from, to: input.window.to, annual: false, months: [] };
   }
-  return { from, to, annual: false, months: complete };
+  return { from, to, annual: false, months: block };
+}
+
+function monthIndex(key: string) {
+  const [year, month] = key.split("-").map(Number);
+  return year * 12 + (month - 1);
+}
+
+function longestConsecutiveBlock(sortedMonths: string[]) {
+  let best: string[] = [];
+  let current: string[] = [];
+  for (const month of sortedMonths) {
+    const previous = current[current.length - 1];
+    current = previous && monthIndex(month) === monthIndex(previous) + 1 ? [...current, month] : [month];
+    if (current.length >= best.length) best = current;
+  }
+  return best;
 }
 
 const CZECH_MONTHS_GENITIVE = ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"];
