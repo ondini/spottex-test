@@ -85,6 +85,10 @@ Bezpečnostní deaktivace nedůvěřuje lokálnímu příznaku stavu. Po zániku
 
 Stávající API na portech `2086` a `45992` nejsou součástí tohoto Compose stacku. Vývojový kontejner k nim může přistupovat přes `host.docker.internal`; jejich nasazení a životní cyklus zůstávají beze změny.
 
+Stažení historie z cloudu výrobce má tři stavy, které platforma rozlišuje. Dokud historie posledního roku nepokrývá aspoň 75 %, stránka analýzy při každé návštěvě (nejdříve hodinu po posledním pokusu) požádá backend přes `POST /history_backfill` o doplnění mezer a poté spustí vlastní import; plánovaná úloha to opakuje každou hodinu pět dní od poslední návštěvy, potom denně. Backend každé dvanáctihodinové okno klasifikuje: okno, na které cloud odpověděl správně, ale prázdně, zapíše do `general.history_unavailable_windows` a už se na ně nikdy neptá; selhané stažení nahlásí správcům e-mailem (`warning_email`) a zkouší znovu. Jakmile backend za všechny střídače odpoví `complete`, platforma uloží do metadat elektrárny `historyClosedAt` a seznam nedostupných oken, stavový řádek napíše, za které měsíce cloud data nemá, automatické pokusy skončí a zůstane jen ruční „Zkontrolovat znovu“, které se backendu zeptá znovu.
+
+Analýza je exaktní: má-li elektrárna méně než deset měsíců úplných měření (300 dní), počítá jen s celými kalendářními měsíci, které existují, a všechny částky na stránce i v e-mailu uvádí za toto období bez přepočtu na rok; návratnost hardwarových variant se do té doby neuvádí. Od deseti měsíců výš se chybějící týdny dopočítají na rok (365 / počet vyhodnocených dní).
+
 V produkci musí `SPOTTEX_LEGACY_API_URL` používat interní HTTPS endpoint. Přihlášení k energetickému účtu přenáší uživatelské credentials, proto je neposílejte na původní port `2086` přes plaintext HTTP. Doporučená topologie je interní TLS reverse proxy před stávající službou. `ALLOW_INSECURE_LEGACY_HTTP=true` je vědomý nouzový override pro řízené prostředí, nikoli produkční výchozí hodnota.
 
 ### Background jobs
