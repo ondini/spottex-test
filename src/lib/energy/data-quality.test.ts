@@ -78,7 +78,8 @@ describe("energy data quality", () => {
     const consumption = intervals(96 * 30).map((item) => ({ ...item, kwh: 0.5 }));
     const battery = intervals(96 * 30).map((item) => ({ ...item, kwh: 0 }));
     const gridImport = intervals(96 * 30).map((item) => ({ ...item, kwh: 0 }));
-    const gridExport = intervals(96 * 30).map((item, index) => ({ ...item, kwh: index < 200 ? 0 : 0.5 }));
+    // The first 200 windows export only a fifth of the surplus: a real mismatch, not a feed gap.
+    const gridExport = intervals(96 * 30).map((item, index) => ({ ...item, kwh: index < 200 ? 0.1 : 0.5 }));
     const quality = summarizeEnergyDataQuality({ production, consumption, battery, gridImport, gridExport, minimumDays: 7 });
     expect(quality.coverageWindows).toEqual([
       { days: 30, matchedIntervals: 2880, expectedIntervals: 2880, coveragePercent: 100 },
@@ -92,6 +93,20 @@ describe("energy data quality", () => {
     expect(quality.gridMeasuredDays).toBe(30);
     expect(quality.readyForEstimate).toBe(false);
     expect(quality.message).toContain("Energetická bilance nesedí");
+  });
+
+  it("treats all-zero battery and grid windows with a surplus as feed gaps, not as a wrong balance", () => {
+    // Saffronela: the live feed reports neither battery nor grid for many
+    // windows and the legacy series fills them with zeros. Those windows must
+    // not block the analysis, which simulates battery and grid itself.
+    const production = intervals(96 * 8).map((item) => ({ ...item, kwh: 1 }));
+    const consumption = intervals(96 * 8).map((item) => ({ ...item, kwh: 0.5 }));
+    const zeros = () => intervals(96 * 8).map((item) => ({ ...item, kwh: 0 }));
+    const quality = summarizeEnergyDataQuality({ production, consumption, battery: zeros(), gridImport: zeros(), gridExport: zeros(), minimumDays: 7 });
+    expect(quality.balanceUnmeasuredIntervals).toBe(768);
+    expect(quality.balanceEvaluatedIntervals).toBe(0);
+    expect(quality.balanceInvalidIntervals).toBe(0);
+    expect(quality.readyForEstimate).toBe(true);
   });
 
   it("opens the estimate on recent complete days even when the whole span is sparse", () => {
