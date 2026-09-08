@@ -492,7 +492,9 @@ export async function getAnalysisWorkspace(
   const periodBySite = new Map<number, SitePeriod>(
     await Promise.all(
       sites.map(async (site): Promise<readonly [number, SitePeriod]> => {
-        const run = site.analysisRuns.find((item) => item.status === "COMPLETED" && item.dataFrom && item.dataTo) ?? null;
+        // The newest run with a window, whatever its status: while a new run
+        // computes, the page still shows the period it will report.
+        const run = site.analysisRuns.find((item) => item.dataFrom && item.dataTo) ?? null;
         const period = run ? runPeriod(run) : null;
         if (!run || !period || period.annual || !run.dataFrom || !run.dataTo) return [site.id, noPeriod];
         const measured = await getEnergyDataQuality(userId, site.id, { window: { from: run.dataFrom, to: run.dataTo } });
