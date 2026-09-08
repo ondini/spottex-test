@@ -12,6 +12,7 @@ import { getCostsCatalogSummary } from "@/lib/costs/client";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
 import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
 import { siteHistoryClosure } from "@/lib/energy/history-import";
+import { nonProducingDayKeys, withoutNonProducingDays } from "@/lib/energy/non-producing-days";
 import { describeHistoryStatus } from "@/lib/energy/history-status";
 import { prepareAnalysisDefaults } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
@@ -1537,7 +1538,11 @@ async function loadDispatchPoints(
   run: {
     dataFrom: Date | null;
     dataTo: Date | null;
-    energySite: { timezone: string; inverters: Array<{ id: number }> };
+    energySite: {
+      timezone: string;
+      inverters: Array<{ id: number }>;
+      technicalProfile?: { pvCapacityKwp: number | null } | null;
+    };
   },
   curveId: string,
 ) {
@@ -1582,8 +1587,15 @@ async function loadDispatchPoints(
     }),
   ]);
   if (!curve) throw new Error("ANALYSIS_PRICE_CURVE_DEFINITION_MISSING");
+  // Days the plant stood still are left out, the same way data quality does.
+  const nonProducing = nonProducingDayKeys(intervals, {
+    pvCapacityKwp: run.energySite.technicalProfile?.pvCapacityKwp ?? null,
+    timeZone: run.energySite.timezone,
+  });
   const loadProfile = deriveIndependentLoadProfile(
-    aggregateSiteIntervals(intervals),
+    aggregateSiteIntervals(
+      withoutNonProducingDays(intervals, nonProducing, run.energySite.timezone),
+    ),
   );
   const price = new Map(
     prices.map((point) => [point.startAt.getTime(), point]),
