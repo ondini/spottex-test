@@ -114,6 +114,7 @@ type Workspace = {
       message: string;
       balanceEvaluatedIntervals: number;
       balanceInvalidIntervals: number;
+      nonProducingDays: number;
       balanceMeanAbsoluteErrorKwh: number | null;
       measuredConsumptionKwh: number;
       measuredProductionKwh: number;
@@ -1322,6 +1323,11 @@ export function AnalysisWorkspace({
             <p className="mt-1 text-lg font-semibold text-slate-950">
               {completeDaysLabel(site.dataQuality.coverageDays)}
             </p>
+            {site.dataQuality.nonProducingDays > 0 && (
+              <p className="mt-0.5 text-xs text-slate-500">
+                bez {site.dataQuality.nonProducingDays} dní, kdy elektrárna nevyráběla
+              </p>
+            )}
             <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-brand-700">
               <BarChart3 className="size-3.5" />
               Prohlédnout graf

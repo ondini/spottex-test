@@ -4,6 +4,7 @@ import { EnergyIntervalKind, EnergyProvider } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { aggregateSiteIntervals } from "@/lib/analysis/load-profile";
+import { nonProducingDayKeys, withoutNonProducingDays } from "./non-producing-days";
 
 import { EnergyError } from "./types";
 
@@ -41,6 +42,8 @@ export type EnergyDataQuality = {
   // Complete-interval share per calendar month of the span, so the UI can say
   // which months the cloud history is missing instead of one percentage.
   monthlyCoverage: Array<{ month: string; coveragePercent: number }>;
+  // Measured days the plant did not produce; left out of everything above.
+  nonProducingDays: number;
   coverageWindows: Array<{ days: 30 | 90 | 365; matchedIntervals: number; expectedIntervals: number; coveragePercent: number }>;
   coverageDays: number;
   spanDays: number;
@@ -64,6 +67,7 @@ export function summarizeEnergyDataQuality(input: {
   now?: Date;
   recentWindowDays?: number;
   recentMinimumDays?: number;
+  nonProducingDays?: number;
 }): EnergyDataQuality {
   const minimumDays = input.minimumDays ?? 7;
   const now = input.now ?? new Date();
@@ -120,6 +124,7 @@ export function summarizeEnergyDataQuality(input: {
       annualizedProductionKwh: 0,
       gridMeasuredDays: 0,
       monthlyCoverage: [],
+      nonProducingDays: input.nonProducingDays ?? 0,
       measuredGridImportKwh: 0,
       measuredGridExportKwh: 0,
       coverageWindows: ([30, 90, 365] as const).map((days) => ({ days, matchedIntervals: 0, expectedIntervals: days * 96, coveragePercent: 0 })),
@@ -275,6 +280,7 @@ export function summarizeEnergyDataQuality(input: {
       Math.round((measuredProductionKwh / coverageDays) * 3650) / 10,
     gridMeasuredDays: Math.round((gridMeasuredIntervals.length / 96) * 10) / 10,
     monthlyCoverage,
+    nonProducingDays: input.nonProducingDays ?? 0,
     measuredGridImportKwh: Math.round(measuredGridImportKwh * 10) / 10,
     measuredGridExportKwh: Math.round(measuredGridExportKwh * 10) / 10,
     coverageWindows,
@@ -325,7 +331,7 @@ async function computeEnergyDataQuality(
 ): Promise<EnergyDataQuality> {
   const site = await prisma.energySite.findFirst({
     where: { id: siteId, userId },
-    include: { inverters: { orderBy: { id: "asc" } } },
+    include: { inverters: { orderBy: { id: "asc" } }, technicalProfile: { select: { pvCapacityKwp: true } } },
   });
   if (!site) throw new EnergyError("SITE_NOT_FOUND", "Elektrárna nebyla nalezena.", 404);
   if (!site.inverters.length) throw new EnergyError("INVERTER_NOT_FOUND", "Elektrárna zatím nemá připojený střídač.", 404);
@@ -341,9 +347,15 @@ async function computeEnergyDataQuality(
   });
   // A window restricts the summary to the period an analysis reported, so the
   // page can show the measured totals of exactly that period.
-  const rawIntervals = window
+  const windowed = window
     ? loadedIntervals.filter((interval) => interval.startAt >= window.from && interval.startAt < window.to)
     : loadedIntervals;
+  // Days the plant stood still are not measurements of a working plant; they
+  // leave the coverage and the totals alike (see non-producing-days.ts).
+  const metadataCapacity = site.metadata && typeof site.metadata === "object" && !Array.isArray(site.metadata) ? (site.metadata as Record<string, unknown>).pvCapacityKwp : null;
+  const pvCapacityKwp = site.technicalProfile?.pvCapacityKwp ?? (typeof metadataCapacity === "number" ? metadataCapacity : null);
+  const nonProducing = nonProducingDayKeys(windowed, { pvCapacityKwp, timeZone: site.timezone });
+  const rawIntervals = withoutNonProducingDays(windowed, nonProducing, site.timezone);
   const expectedInverterIds = new Set(
     site.inverters.map((inverter) => inverter.id),
   );
@@ -391,6 +403,7 @@ async function computeEnergyDataQuality(
     gridExport: intervals.filter((item) => item.kind === EnergyIntervalKind.GRID_EXPORT),
     minimumDays: site.provider === EnergyProvider.DEMO ? 0.25 : 7,
     now: new Date(),
+    nonProducingDays: nonProducing.size,
   });
 }
 
