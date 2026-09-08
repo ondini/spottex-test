@@ -38,6 +38,9 @@ export type EnergyDataQuality = {
   gridMeasuredDays: number;
   measuredGridImportKwh: number;
   measuredGridExportKwh: number;
+  // Complete-interval share per calendar month of the span, so the UI can say
+  // which months the cloud history is missing instead of one percentage.
+  monthlyCoverage: Array<{ month: string; coveragePercent: number }>;
   coverageWindows: Array<{ days: 30 | 90 | 365; matchedIntervals: number; expectedIntervals: number; coveragePercent: number }>;
   coverageDays: number;
   spanDays: number;
@@ -116,6 +119,7 @@ export function summarizeEnergyDataQuality(input: {
       annualizedConsumptionKwh: 0,
       annualizedProductionKwh: 0,
       gridMeasuredDays: 0,
+      monthlyCoverage: [],
       measuredGridImportKwh: 0,
       measuredGridExportKwh: 0,
       coverageWindows: ([30, 90, 365] as const).map((days) => ({ days, matchedIntervals: 0, expectedIntervals: days * 96, coveragePercent: 0 })),
@@ -206,6 +210,27 @@ export function summarizeEnergyDataQuality(input: {
   const balanceCoveredIntervals = balanceEvaluatedIntervals + balanceUnmeasuredIntervals;
   const balanceCoverage = matched.length > 0 ? balanceCoveredIntervals / matched.length : 0;
   const balanceCanBlock = balanceEvaluatedIntervals >= 7 * 96 && balanceCoverage >= 0.5;
+  const monthKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague", year: "numeric", month: "2-digit" });
+  const matchedByMonth = new Map<string, number>();
+  for (const timestamp of matched) {
+    const key = monthKey.format(new Date(timestamp));
+    matchedByMonth.set(key, (matchedByMonth.get(key) ?? 0) + 1);
+  }
+  const monthlyCoverage: Array<{ month: string; coveragePercent: number }> = [];
+  const [firstYear, firstMonth] = monthKey.format(new Date(first)).split("-").map(Number);
+  const [lastYear, lastMonth] = monthKey.format(new Date(last)).split("-").map(Number);
+  for (let year = firstYear, month = firstMonth; year < lastYear || (year === lastYear && month <= lastMonth); ) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    // Month edges approximate Prague midnight; a one-hour DST offset error on a
+    // month with thousands of intervals does not change the percentage shown.
+    const monthStart = Math.max(first, Date.UTC(year, month - 1, 1) - 2 * 3_600_000);
+    const monthEnd = Math.min(last + 900_000, Date.UTC(year, month, 1) - 2 * 3_600_000);
+    const expected = Math.max(1, Math.round((monthEnd - monthStart) / 900_000));
+    monthlyCoverage.push({ month: key, coveragePercent: Math.min(100, Math.round(((matchedByMonth.get(key) ?? 0) / expected) * 1_000) / 10) });
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+    if (monthlyCoverage.length >= 15) break;
+  }
   const coverageWindows = ([30, 90, 365] as const).map((days) => {
     const windowStart = last - (days * 96 - 1) * 900_000;
     const count = matched.filter((timestamp) => timestamp >= windowStart && timestamp <= last).length;
@@ -249,6 +274,7 @@ export function summarizeEnergyDataQuality(input: {
     annualizedProductionKwh:
       Math.round((measuredProductionKwh / coverageDays) * 3650) / 10,
     gridMeasuredDays: Math.round((gridMeasuredIntervals.length / 96) * 10) / 10,
+    monthlyCoverage,
     measuredGridImportKwh: Math.round(measuredGridImportKwh * 10) / 10,
     measuredGridExportKwh: Math.round(measuredGridExportKwh * 10) / 10,
     coverageWindows,

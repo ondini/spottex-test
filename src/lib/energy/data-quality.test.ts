@@ -123,6 +123,22 @@ describe("energy data quality", () => {
     expect(quality.readyForEstimate).toBe(true);
   });
 
+  it("reports which months of the span are covered", () => {
+    // Two weeks in January, nothing in February, ten days in March.
+    const at = (base: string, days: number) => Array.from({ length: 96 * days }, (_, index) => ({
+      startAt: new Date(new Date(base).getTime() + index * 900_000),
+      endAt: new Date(new Date(base).getTime() + (index + 1) * 900_000),
+      kwh: 1,
+    }));
+    const production = [...at("2026-01-10T00:00:00.000Z", 14), ...at("2026-03-11T00:00:00.000Z", 10)];
+    const quality = summarizeEnergyDataQuality({ production, consumption: production, minimumDays: 7 });
+    expect(quality.monthlyCoverage.map((item) => item.month)).toEqual(["2026-01", "2026-02", "2026-03"]);
+    expect(quality.monthlyCoverage[1].coveragePercent).toBe(0);
+    expect(quality.monthlyCoverage[0].coveragePercent).toBeGreaterThan(50);
+    // March counts from the 1st to the last measured day: ten of twenty days.
+    expect(quality.monthlyCoverage[2].coveragePercent).toBeCloseTo(50, 0);
+  });
+
   it("opens the estimate on recent complete days even when the whole span is sparse", () => {
     const now = new Date("2026-09-06T00:00:00.000Z");
     const day = 86_400_000;

@@ -87,6 +87,17 @@ type Workspace = {
       doneChunks: number;
       importedPoints: number;
     } | null;
+    historyStatus: {
+      show: boolean;
+      running: boolean;
+      coverageDays: number;
+      coveragePercent: number;
+      missingMonths: string[];
+      progress: { doneChunks: number; totalChunks: number; importedPoints: number } | null;
+      lastAttempt: { at: string; outcome: string; succeededChunks: number; failedChunks: number; totalChunks: number; error: string | null } | null;
+      nextAutomaticAt: string | null;
+      canRetryNow: boolean;
+    } | null;
     ready: boolean;
     blockers: string[];
     priceCurveWarnings: string[];
@@ -612,6 +623,26 @@ export function AnalysisWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenData, site?.id]);
 
+  const [historyPending, setHistoryPending] = useState(false);
+  async function retryHistory() {
+    if (!site) return;
+    setHistoryPending(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/app/energy/sites/${site.id}/history-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: 365 }),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error || "Stahování historie se nepodařilo spustit.");
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Stahování historie se nepodařilo spustit.");
+    } finally {
+      setHistoryPending(false);
+    }
+  }
   async function start() {
     if (!site) return;
     setPending(true);
@@ -1310,63 +1341,107 @@ export function AnalysisWorkspace({
             </Link>
           ) : null}
         </div>
-        {!site.ready && site.historyImport ? (
-          // Waiting on the cloud is not a task list. Name what is being
-          // downloaded, show how far it got, and say what happens on its own
-          // once it finishes.
+        {site.historyStatus?.show ? (
+          // Sparse or downloading history is stated plainly: how much there
+          // is, which months are missing, what the last attempt did, that the
+          // next one is automatic, and a way to ask right now.
           <div className="mt-5 rounded-xl border border-brand-200 bg-brand-50 p-4">
             <div className="flex items-center gap-2">
               <CloudDownload className="size-5 shrink-0 text-brand-600" />
               <p className="text-sm font-semibold text-slate-900">
-                Stahujeme historii výroby a spotřeby z cloudu
+                {site.historyStatus.running
+                  ? "Stahujeme historii výroby a spotřeby z cloudu"
+                  : "Historie měření za poslední rok je neúplná"}
               </p>
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              Načítáme naměřené hodnoty za poslední rok z cloudu výrobce vaší
-              elektrárny. Trvá to obvykle několik desítek minut a nemusíte u
-              toho zůstat — klidně zavřete okno.
+              Máme {number.format(site.historyStatus.coverageDays)} úplných dní,{" "}
+              {number.format(site.historyStatus.coveragePercent)} % období.
+              {site.historyStatus.missingMonths.length > 0
+                ? ` Chybí především: ${site.historyStatus.missingMonths.join(", ")}.`
+                : ""}{" "}
+              Chybějící období si zkoušíme stáhnout znovu z cloudu výrobce
+              sami: každou hodinu, dokud se sem vracíte, jinak jednou denně.
+              Některá období cloud výrobce nemusí mít vůbec.
             </p>
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-600">
-                <span>
-                  Načteno {site.historyImport.doneChunks} z{" "}
-                  {site.historyImport.totalChunks} období
-                </span>
-                <span>
-                  {Math.round(
-                    (site.historyImport.doneChunks /
-                      Math.max(1, site.historyImport.totalChunks)) *
-                      100,
-                  )}{" "}
-                  %
-                </span>
-              </div>
-              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white">
-                <div
-                  className="h-full rounded-full bg-brand-500 transition-all duration-700"
-                  style={{
-                    width: `${Math.max(
-                      3,
-                      Math.round(
-                        (site.historyImport.doneChunks /
-                          Math.max(1, site.historyImport.totalChunks)) *
+            {site.historyStatus.lastAttempt && !site.historyStatus.running && (
+              <p className="mt-2 text-xs leading-5 text-slate-600">
+                Poslední pokus{" "}
+                {new Date(site.historyStatus.lastAttempt.at).toLocaleString("cs-CZ", { timeZone: "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}
+                :{" "}
+                {site.historyStatus.lastAttempt.outcome === "COMPLETED"
+                  ? "cloud vrátil vše, co má"
+                  : site.historyStatus.lastAttempt.outcome === "PARTIAL"
+                    ? "část období se nepodařilo načíst"
+                    : site.historyStatus.lastAttempt.outcome === "FAILED"
+                      ? "stahování selhalo"
+                      : site.historyStatus.lastAttempt.outcome === "CANCELED"
+                        ? "stahování bylo zastaveno"
+                        : "probíhá"}{" "}
+                ({site.historyStatus.lastAttempt.succeededChunks} z{" "}
+                {site.historyStatus.lastAttempt.totalChunks} období
+                {site.historyStatus.lastAttempt.error ? `, ${site.historyStatus.lastAttempt.error}` : ""}).
+                {site.historyStatus.nextAutomaticAt
+                  ? ` Další automatický pokus ${new Date(site.historyStatus.nextAutomaticAt).toLocaleString("cs-CZ", { timeZone: "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}.`
+                  : ""}
+              </p>
+            )}
+            {site.historyStatus.progress && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                  <span>
+                    Načteno {site.historyStatus.progress.doneChunks} z{" "}
+                    {site.historyStatus.progress.totalChunks} období
+                  </span>
+                  <span>
+                    {Math.round(
+                      (site.historyStatus.progress.doneChunks /
+                        Math.max(1, site.historyStatus.progress.totalChunks)) *
+                        100,
+                    )}{" "}
+                    %
+                  </span>
+                </div>
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white">
+                  <div
+                    className="h-full rounded-full bg-brand-500 transition-all duration-700"
+                    style={{
+                      width: `${Math.max(
+                        3,
+                        (site.historyStatus.progress.doneChunks /
+                          Math.max(1, site.historyStatus.progress.totalChunks)) *
                           100,
-                      ),
-                    )}%`,
-                  }}
-                />
+                      )}%`,
+                    }}
+                  />
+                </div>
+                {site.historyStatus.progress.importedPoints > 0 && (
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Zatím {number.format(site.historyStatus.progress.importedPoints)}{" "}
+                    naměřených záznamů.
+                  </p>
+                )}
               </div>
-              {site.historyImport.importedPoints > 0 && (
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Zatím {number.format(site.historyImport.importedPoints)}{" "}
-                  naměřených záznamů.
-                </p>
-              )}
+            )}
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="app-button-secondary"
+                disabled={historyPending || !site.historyStatus.canRetryNow}
+                onClick={() => void retryHistory()}
+              >
+                {historyPending ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <CloudDownload className="size-4" />
+                )}
+                {site.historyStatus.running ? "Stahování běží" : "Zkusit stáhnout znovu"}
+              </button>
+              <p className="text-sm leading-6 text-slate-700">
+                Jakmile data dorazí, <strong>analýza úspor se spustí sama</strong>{" "}
+                a výsledek pošleme e‑mailem.
+              </p>
             </div>
-            <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-sm leading-6 text-slate-700">
-              Jakmile budou data kompletní, <strong>analýza úspor se spustí
-              sama</strong> a výsledky vám pošleme e-mailem.
-            </p>
           </div>
         ) : !site.ready ? (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -1890,6 +1965,24 @@ export function AnalysisWorkspace({
             </p>
             <div className="mt-4 border-t border-slate-100 pt-4">
               <p className="max-w-3xl text-xs leading-5 text-slate-500">
+                {(() => {
+                  const missing = baseMatrixCombinations.filter(
+                    (combination) =>
+                      !comparisonMatrixRows.some(
+                        (row) => productKey(row) === combination.key,
+                      ),
+                  );
+                  if (missing.length === 0 || rateOptions.length === 0) return null;
+                  const business = rateOptions.every((rate) => rate.toUpperCase().startsWith("C"));
+                  return (
+                    <span className="mb-2 block">
+                      {missing.map((combination) => combination.label).join(" a ")}:{" "}
+                      {business
+                        ? "pro firemní odběr (sazby C) veřejný katalog zatím neobsahuje spotové produkty; řádky doplníme, jakmile budou k dispozici. Vlastní dodavatel je oceněn na všech sazbách v řádku Fix → fix."
+                        : "pro tyto kombinace zatím nejsou ověřené veřejné ceníky; doplníme je, jakmile budou v katalogu."}
+                    </span>
+                  );
+                })()}
                 Tabulka vybírá nejlepší veřejné ceníky. Pro porovnání s vaší
                 skutečnou smlouvou stačí nahrát fakturu.
               </p>

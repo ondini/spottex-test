@@ -11,6 +11,7 @@ import { buildAnalysisCompletionEmail } from "./completion-email";
 import { getCostsCatalogSummary } from "@/lib/costs/client";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
 import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
+import { describeHistoryStatus } from "@/lib/energy/history-status";
 import { prepareAnalysisDefaults } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
 import { calculateAnnualControlOffer } from "@/lib/commerce/service-offer";
@@ -541,6 +542,26 @@ export async function getAnalysisWorkspace(
   const historyImportBySite = aggregateHistoryProgressBySite(
     runningHistoryImports,
   );
+  // The last download attempt per plant, running or not: the page says what
+  // it did and when the next automatic one is due.
+  const latestHistoryImports = await prisma.energyHistoryImport.findMany({
+    where: { energySiteId: { in: sites.map((site) => site.id) } },
+    orderBy: [{ energySiteId: "asc" }, { createdAt: "desc" }],
+    distinct: ["energySiteId"],
+    select: {
+      energySiteId: true,
+      status: true,
+      createdAt: true,
+      completedAt: true,
+      succeededChunks: true,
+      failedChunks: true,
+      totalChunks: true,
+      lastError: true,
+    },
+  });
+  const latestHistoryImportBySite = new Map(
+    latestHistoryImports.map((item) => [item.energySiteId, item]),
+  );
   const standardCatalogReady = publishedProductVersions > 0 && publishedDistributionVersions > 0;
   return {
     engine: {
@@ -606,20 +627,30 @@ export async function getAnalysisWorkspace(
         ...(!dataQuality.readyForEstimate ? [dataQuality.message] : []),
       ];
       const historyImport = historyImportBySite.get(site.id);
+      const runningProgress = historyImport
+        ? {
+            totalChunks: historyImport.totalChunks,
+            doneChunks: Math.min(
+              historyImport.totalChunks,
+              historyImport.succeededChunks + historyImport.failedChunks,
+            ),
+            importedPoints: historyImport.importedPoints,
+          }
+        : null;
+      const lastViewedAtRaw = object(site.metadata).lastViewedAt;
+      const historyStatus = describeHistoryStatus({
+        dataQuality,
+        latestImport: latestHistoryImportBySite.get(site.id) ?? null,
+        running: runningProgress,
+        lastViewedAt:
+          typeof lastViewedAtRaw === "string" ? new Date(lastViewedAtRaw) : null,
+      });
       return {
         id: site.id,
         name: site.name,
         preparing: preparingSiteIds.has(site.id),
-        historyImport: historyImport
-          ? {
-              totalChunks: historyImport.totalChunks,
-              doneChunks: Math.min(
-                historyImport.totalChunks,
-                historyImport.succeededChunks + historyImport.failedChunks,
-              ),
-              importedPoints: historyImport.importedPoints,
-            }
-          : null,
+        historyImport: runningProgress,
+        historyStatus,
         dataQuality,
         ready: blockers.length === 0,
         blockers,
