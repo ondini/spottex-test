@@ -90,6 +90,48 @@ function spec(values: Spec[], keys: string[]) {
   );
 }
 
+/**
+ * Every low-voltage distribution rate of the ERÚ price decision the platform
+ * knows how to price. Rates lettered D are household, C are business; the
+ * platform derives the low-tariff hours from the code, so the catalog must use
+ * the exact ERÚ code.
+ */
+export const KNOWN_DISTRIBUTION_TARIFFS: Record<string, [string, string]> = {
+  D01D: ["Malá spotřeba", "Jednotarifní sazba pro odběrná místa s velmi malou spotřebou."],
+  D02D: ["Běžná spotřeba", "Běžná jednotarifní sazba pro domácnosti."],
+  D25D: ["Ohřev vody · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro akumulační ohřev vody."],
+  D26D: ["Akumulační vytápění · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro akumulační vytápění."],
+  D27D: ["Elektromobilita · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro elektromobilitu."],
+  D35D: ["Hybridní vytápění · 20 hodin NT", "Vyžaduje splnění podmínek distributora pro hybridní vytápění."],
+  D45D: ["Přímotopné vytápění · 20 hodin NT", "Vyžaduje splnění podmínek distributora pro přímotopné vytápění."],
+  D56D: ["Tepelné čerpadlo · 20 hodin NT", "Vyžaduje splnění podmínek distributora pro tepelné čerpadlo (dříve přiznaná sazba)."],
+  D57D: ["Tepelné čerpadlo · 20 hodin NT", "Vyžaduje splnění podmínek distributora pro tepelné čerpadlo."],
+  D61D: ["Víkendová sazba", "Nízký tarif o víkendech; vyžaduje splnění podmínek distributora."],
+  C01D: ["Malá spotřeba (podnikatelé)", "Jednotarifní sazba pro odběrná místa podnikatelů s malou spotřebou."],
+  C02D: ["Střední spotřeba (podnikatelé)", "Jednotarifní sazba pro odběrná místa podnikatelů se střední spotřebou."],
+  C03D: ["Vyšší spotřeba (podnikatelé)", "Jednotarifní sazba pro odběrná místa podnikatelů s vyšší spotřebou; vysoká platba za jistič."],
+  C25D: ["Akumulace · 8 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro akumulační spotřebiče."],
+  C26D: ["Akumulační vytápění · 8 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro akumulační vytápění."],
+  C27D: ["Elektromobilita · 8 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro elektromobilitu."],
+  C35D: ["Hybridní vytápění · 20 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro hybridní vytápění."],
+  C45D: ["Přímotopné vytápění · 20 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro přímotopné vytápění."],
+  C46D: ["Přímotopné vytápění · 20 hodin NT (podnikatelé, vyšší podíl)", "Vyžaduje splnění podmínek distributora pro přímotopné vytápění."],
+  C56D: ["Tepelné čerpadlo · 20 hodin NT (podnikatelé)", "Vyžaduje splnění podmínek distributora pro tepelné čerpadlo."],
+  C62D: ["Veřejné osvětlení", "Speciální sazba pro veřejné osvětlení."],
+};
+
+export function segmentForDistributionCode(code: string): "HOUSEHOLD" | "BUSINESS" {
+  return code.trim().toUpperCase().startsWith("C") ? "BUSINESS" : "HOUSEHOLD";
+}
+
+// A product's segment comes from the catalog when stated; otherwise the rates
+// it can be signed with decide it, so a product listed for C rates is business.
+export function catalogCustomerSegment(declared: string | null, distributionCode: string): "HOUSEHOLD" | "BUSINESS" {
+  const normalized = declared?.trim().toUpperCase();
+  if (normalized === "BUSINESS" || normalized === "HOUSEHOLD") return normalized;
+  return segmentForDistributionCode(distributionCode);
+}
+
 function textField(values: Spec[], keys: string[]) {
   return spec(values, keys)?.valueText?.trim() || null;
 }
@@ -282,10 +324,11 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
       const fixedBuyNt = ["D01D", "D02D"].includes(distributionCode) && singleTariffBuy != null
         ? singleTariffBuy
         : numberField(version.specValues, ["fixedBuyNtCzkKwh"]);
+      const segment = catalogCustomerSegment(textField(version.specValues, ["customerSegment"]), distributionCode);
       const product = await prisma.energyProduct.upsert({
         where: { supplierId_code: { supplierId: company.id, code: `COSTS_${item.id}_${distributionCode}` } },
-        update: { name: `${item.name} · ${distributionCode}`, active: true, metadata: { direction, distributionCodes: [distributionCode], costsItemId: item.id, verificationStatus: "VERIFIED", referenceOnly: false } },
-        create: { supplierId: company.id, code: `COSTS_${item.id}_${distributionCode}`, name: `${item.name} · ${distributionCode}`, customerSegment: "HOUSEHOLD", metadata: { direction, distributionCodes: [distributionCode], costsItemId: item.id, verificationStatus: "VERIFIED", referenceOnly: false } },
+        update: { name: `${item.name} · ${distributionCode}`, active: true, customerSegment: segment, metadata: { direction, distributionCodes: [distributionCode], costsItemId: item.id, verificationStatus: "VERIFIED", referenceOnly: false } },
+        create: { supplierId: company.id, code: `COSTS_${item.id}_${distributionCode}`, name: `${item.name} · ${distributionCode}`, customerSegment: segment, metadata: { direction, distributionCodes: [distributionCode], costsItemId: item.id, verificationStatus: "VERIFIED", referenceOnly: false } },
       });
       await prisma.energyProductVersion.upsert({
         where: { productId_validFrom: { productId: product.id, validFrom } },
@@ -318,13 +361,7 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
     }
   }
 
-  const tariffNames: Record<string, [string, string]> = {
-    D01D: ["Malá spotřeba", "Jednotarifní sazba pro odběrná místa s velmi malou spotřebou."],
-    D02D: ["Běžná spotřeba", "Běžná jednotarifní sazba pro domácnosti."],
-    D25D: ["Ohřev vody · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro akumulační ohřev vody."],
-    D26D: ["Akumulační vytápění · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro akumulační vytápění."],
-    D27D: ["Elektromobilita · 8 hodin NT", "Vyžaduje splnění podmínek distributora pro elektromobilitu."],
-  };
+  const tariffNames = KNOWN_DISTRIBUTION_TARIFFS;
   for (const item of distribution.items) {
     const version = item.versions[0];
     const document = version?.sourceDocumentId ? documentById.get(version.sourceDocumentId) : null;
@@ -341,10 +378,11 @@ export async function syncCostsEnergyCatalog(options?: { force?: boolean; now?: 
       create: { code: distributorCompanyCode(distributorName), name: distributorName, roles: ["DISTRIBUTOR"], metadata: { source: "COSTS", verified: true } },
     });
     const source = await archiveSourceDocument(baseUrl, document, distribution.snapshot.asOf, "COSTS_ENERGY_DISTRIBUTION", now);
+    const tariffSegment = segmentForDistributionCode(code);
     const tariff = await prisma.distributionTariff.upsert({
-      where: { distributorId_code_customerSegment: { distributorId: company.id, code: `${code.slice(0, -1)}d`, customerSegment: "HOUSEHOLD" } },
+      where: { distributorId_code_customerSegment: { distributorId: company.id, code: `${code.slice(0, -1)}d`, customerSegment: tariffSegment } },
       update: { name: tariffNames[code][0], eligibilityNote: tariffNames[code][1], active: true },
-      create: { distributorId: company.id, code: `${code.slice(0, -1)}d`, name: tariffNames[code][0], eligibilityNote: tariffNames[code][1], customerSegment: "HOUSEHOLD" },
+      create: { distributorId: company.id, code: `${code.slice(0, -1)}d`, name: tariffNames[code][0], eligibilityNote: tariffNames[code][1], customerSegment: tariffSegment },
     });
     await prisma.distributionTariffVersion.upsert({
       where: { distributionTariffId_validFrom: { distributionTariffId: tariff.id, validFrom } },
