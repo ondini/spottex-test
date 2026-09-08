@@ -38,9 +38,16 @@ export function chooseEvaluationWindow(input: {
   if (input.coverageDays >= ANNUAL_MINIMUM_DAYS) {
     return { from: input.window.from, to: input.window.to, annual: true, months: [] };
   }
+  // A month counts only when it is finished: the running month's coverage is
+  // measured up to today and would otherwise pass as "complete".
   const complete = input.monthlyCoverage
     .filter((item) => item.coveragePercent >= COMPLETE_MONTH_PERCENT)
     .map((item) => item.month)
+    .filter((month) => {
+      const [year, monthNumber] = month.split("-").map(Number);
+      const end = pragueMonthStart(monthNumber === 12 ? year + 1 : year, monthNumber === 12 ? 1 : monthNumber + 1);
+      return end.getTime() <= input.window.to.getTime();
+    })
     .sort();
   if (!complete.length) {
     return { from: input.window.from, to: input.window.to, annual: false, months: [] };
