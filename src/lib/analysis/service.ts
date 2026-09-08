@@ -1336,6 +1336,14 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
           compareAllTariffs: input.compareAllTariffs,
         })
       : 0;
+  // The measurements themselves are part of the inputs: a later history import
+  // or a newly excluded non-producing day must produce a new run for the same
+  // window, not hand back the stale one.
+  const latestImport = await prisma.energyHistoryImport.findFirst({
+    where: { energySiteId: site.id, status: "COMPLETED" },
+    orderBy: { completedAt: "desc" },
+    select: { id: true, completedAt: true },
+  });
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
@@ -1343,6 +1351,11 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
         kind: input.kind,
         dataFrom: dataFrom.toISOString(),
         dataTo: dataTo.toISOString(),
+        data: {
+          latestImport: latestImport?.completedAt?.toISOString() ?? null,
+          coverageDays: quality.coverageDays,
+          nonProducingDays: quality.nonProducingDays,
+        },
         profileUpdatedAt: profile.updatedAt.toISOString(),
         curves: curves.map((curve) => curve.fingerprint),
         variants: uniqueVariants,
@@ -1363,11 +1376,9 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
     },
   });
   if (existing) {
-    if (
-      (existing.status === "SUPERSEDED" &&
-        existing.errorCode === "CANCELED_BY_USER") ||
-      existing.status === "FAILED"
-    ) {
+    // A superseded run's results are stale by definition (inputs changed, or
+    // the user canceled it), so it is recomputed rather than handed back.
+    if (existing.status === "SUPERSEDED" || existing.status === "FAILED") {
       return prisma.$transaction(async (tx) => {
         const run = await tx.energyAnalysisRun.update({
           where: { id: existing.id },
