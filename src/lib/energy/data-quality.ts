@@ -312,13 +312,16 @@ const QUALITY_CACHE_MS = Math.max(
 
 export function invalidateEnergyDataQualityCache(siteId: number) {
   for (const key of qualityCache.keys()) {
-    if (key.endsWith(`:${siteId}`)) qualityCache.delete(key);
+    if (key.split(":")[1] === String(siteId)) qualityCache.delete(key);
   }
 }
+
+export type DataQualityWindow = { from: Date; to: Date };
 
 async function computeEnergyDataQuality(
   userId: number,
   siteId: number,
+  window?: DataQualityWindow,
 ): Promise<EnergyDataQuality> {
   const site = await prisma.energySite.findFirst({
     where: { id: siteId, userId },
@@ -326,7 +329,7 @@ async function computeEnergyDataQuality(
   });
   if (!site) throw new EnergyError("SITE_NOT_FOUND", "Elektrárna nebyla nalezena.", 404);
   if (!site.inverters.length) throw new EnergyError("INVERTER_NOT_FOUND", "Elektrárna zatím nemá připojený střídač.", 404);
-  const rawIntervals = await prisma.energyInterval.findMany({
+  const loadedIntervals = await prisma.energyInterval.findMany({
     where: {
       inverterId: { in: site.inverters.map((inverter) => inverter.id) },
       predicted: false,
@@ -336,6 +339,11 @@ async function computeEnergyDataQuality(
     select: { inverterId: true, kind: true, startAt: true, endAt: true, kwh: true },
     orderBy: { startAt: "asc" },
   });
+  // A window restricts the summary to the period an analysis reported, so the
+  // page can show the measured totals of exactly that period.
+  const rawIntervals = window
+    ? loadedIntervals.filter((interval) => interval.startAt >= window.from && interval.startAt < window.to)
+    : loadedIntervals;
   const expectedInverterIds = new Set(
     site.inverters.map((inverter) => inverter.id),
   );
@@ -389,11 +397,12 @@ async function computeEnergyDataQuality(
 export async function getEnergyDataQuality(
   userId: number,
   siteId: number,
+  options: { window?: DataQualityWindow } = {},
 ): Promise<EnergyDataQuality> {
-  const key = `${userId}:${siteId}`;
+  const key = `${userId}:${siteId}:${options.window ? `${options.window.from.toISOString()}-${options.window.to.toISOString()}` : "all"}`;
   const cached = qualityCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = computeEnergyDataQuality(userId, siteId);
+  const value = computeEnergyDataQuality(userId, siteId, options.window);
   qualityCache.set(key, {
     expiresAt: Date.now() + QUALITY_CACHE_MS,
     value,

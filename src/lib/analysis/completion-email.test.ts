@@ -100,4 +100,31 @@ describe("analysis completion e-mail", () => {
     expect(mail.text).toContain("- 6,3 kWp / 53 kWh (dnešní hardware): 5 591 Kč/rok");
     expect(mail.text).toContain("- 12 kWp / 53 kWh: -13 117 Kč/rok — Enerspot · SPOT – nákup · D27D · D27d · s chytrým řízením (proti dnešku úspora 24 591 Kč/rok, návratnost 14,2 let, proti provozu s řízením 18,7 let)");
   });
+
+  it("reports the measured months instead of a year when fewer than ten months exist and claims no payback", () => {
+    const mail = buildAnalysisCompletionEmail({
+      ...base,
+      kind: "PRO",
+      dataFrom: new Date("2026-05-31T22:00:00Z"),
+      dataTo: new Date("2026-07-31T22:00:00Z"),
+      period: { annual: false, label: "červen–červenec 2026", factor: 61 / 365 },
+      scenarios: [
+        scenario({ label: "Váš současný produkt · EnerSpot · Základní výkup · D25d · self-use", controlMode: "SELF_USE", currentTariff: true, annualCostCzk: 36500 }),
+        scenario({ label: "Enerspot · SPOT – nákup · D25D · D25d · chytré řízení", annualCostCzk: 18250 }),
+        scenario({
+          label: "Baterie 20 kWh · Enerspot · SPOT – nákup · D25D · D25d · chytré řízení",
+          currentHardware: false,
+          batteryCapacityKwh: 20,
+          annualCostCzk: 7300,
+          investment: { vsCurrentControl: { annualSavingsCzk: 29200, simplePaybackYears: 4 }, vsOptimizedControl: { annualSavingsCzk: 10950, simplePaybackYears: 9 } },
+        }),
+      ],
+    });
+    expect(mail.text).toContain("3 050 Kč za červen–červenec 2026");
+    expect(mail.text).toContain("1 220 Kč za červen–červenec 2026");
+    expect(mail.text).toContain("na rok je nepřepočítáváme");
+    expect(mail.text).not.toContain("Kč/rok");
+    expect(mail.text).toContain("návratnost investice spočítáme, až bude k dispozici aspoň deset měsíců měření");
+    expect(mail.text).not.toMatch(/návratnost[^\n]*\d/i);
+  });
 });

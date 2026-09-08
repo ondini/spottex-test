@@ -45,4 +45,25 @@ describe("history status for the analysis page", () => {
     expect(status.show).toBe(false);
     expect(monthLabel("2026-03")).toBe("březen 2026");
   });
+
+  it("stops planning retries once the backend says the cloud has nothing more, but still allows a manual check", () => {
+    const status = describeHistoryStatus({
+      now,
+      dataQuality: { coverageDays: 190, coveragePercent: 59.7, spanDays: 320, monthlyCoverage: [{ month: "2025-11", coveragePercent: 0 }, { month: "2025-12", coveragePercent: 0 }, { month: "2026-06", coveragePercent: 98 }] },
+      latestImport: { status: "COMPLETED", createdAt: new Date("2026-09-08T11:50:00.000Z"), completedAt: new Date("2026-09-08T11:58:00.000Z"), succeededChunks: 19, failedChunks: 0, totalChunks: 19, lastError: null },
+      running: null,
+      lastViewedAt: new Date("2026-09-08T11:00:00.000Z"),
+      closed: {
+        closedAt: new Date("2026-09-08T11:59:00.000Z"),
+        unavailable: [
+          { from: "2025-11-03T00:00:00", to: "2025-12-20T12:00:00" },
+          { from: "2026-03-01T00:00:00", to: "2026-03-02T00:00:00" },
+        ],
+      },
+    });
+    expect(status.show).toBe(true);
+    expect(status.closed?.unavailableMonths).toEqual(["listopad 2025", "prosinec 2025", "březen 2026"]);
+    expect(status.nextAutomaticAt).toBeNull();
+    expect(status.canRetryNow).toBe(true);
+  });
 });

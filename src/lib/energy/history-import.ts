@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { EnergyIntervalKind, EnergyProvider, JobStatus } from "@prisma/client";
+import { EnergyIntervalKind, EnergyProvider, JobStatus, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
@@ -462,6 +462,8 @@ export async function requeueSparseHistoryImports(now = new Date()) {
         select: { requestedFrom: true, requestedTo: true, createdAt: true },
       });
       if (!latest) continue;
+      // The cloud has nothing more for this site; scheduled retries stop.
+      if (siteHistoryClosure(site.metadata)) continue;
       const batch = await prisma.energyHistoryImport.findMany({
         where: { energySiteId: site.id, requestedFrom: latest.requestedFrom, requestedTo: latest.requestedTo },
         select: { status: true },
@@ -510,18 +512,20 @@ export async function markSiteViewed(userId: number, siteId: number, now = new D
  * filled. Best effort: the backend may be unreachable or the process may lack
  * the legacy credentials, and neither must stop the platform's own import.
  */
-export async function requestBackendHistoryBackfill(userId: number, siteId: number, trigger: "VISIT" | "SCHEDULE" | "MANUAL") {
+export async function requestBackendHistoryBackfill(userId: number, siteId: number, trigger: "VISIT" | "SCHEDULE" | "MANUAL", now = new Date()) {
   const site = await prisma.energySite.findFirst({ where: { id: siteId, userId, provider: EnergyProvider.LEGACY_SPOTTEX }, include: { inverters: { orderBy: { id: "asc" } } } });
-  if (!site || !LegacySpottexClient.isConfigured()) return { requested: 0, results: [] as Array<{ inverterId: number; status: string }> };
+  if (!site || !LegacySpottexClient.isConfigured()) return { requested: 0, closed: false, results: [] as Array<{ inverterId: number; status: string }> };
   const connection = await prisma.energyConnection.findUnique({ where: { userId_provider: { userId, provider: EnergyProvider.LEGACY_SPOTTEX } } });
-  if (!connection?.encryptedAccessToken || !connection.encryptedRefreshToken) return { requested: 0, results: [] };
+  if (!connection?.encryptedAccessToken || !connection.encryptedRefreshToken) return { requested: 0, closed: false, results: [] };
   const before = { accessToken: decryptSecret(connection.encryptedAccessToken), refreshToken: decryptSecret(connection.encryptedRefreshToken) };
   const client = new LegacySpottexClient({ tokens: before });
   const results: Array<{ inverterId: number; status: string }> = [];
+  const unavailable: HistoryUnavailableWindow[] = [];
   for (const inverter of site.inverters) {
     try {
       const result = await client.requestHistoryBackfill(inverter.externalDeviceId);
       results.push({ inverterId: inverter.id, status: result.status });
+      unavailable.push(...result.unavailable.map((item) => ({ ...item, inverterId: inverter.id })));
     } catch (error) {
       results.push({ inverterId: inverter.id, status: error instanceof Error ? error.message.slice(0, 120) : "FAILED" });
     }
@@ -530,8 +534,42 @@ export async function requestBackendHistoryBackfill(userId: number, siteId: numb
   if (after && (after.accessToken !== before.accessToken || after.refreshToken !== before.refreshToken)) {
     await prisma.energyConnection.update({ where: { id: connection.id }, data: { encryptedAccessToken: encryptSecret(after.accessToken), encryptedRefreshToken: encryptSecret(after.refreshToken), tokenExpiresAt: accessTokenExpiresAt(after.accessToken) } });
   }
-  await prisma.auditLog.create({ data: { actorUserId: userId, action: "ENERGY_HISTORY_BACKFILL_REQUESTED", entityType: "EnergySite", entityId: String(site.id), metadata: { trigger, results } } });
-  return { requested: results.filter((item) => item.status === "queued").length, results };
+  // "complete" from every inverter means nothing inside the download horizon
+  // is missing except what the cloud already answered empty: the history is
+  // closed and no further automatic attempts are worth making. Anything else
+  // (queued, running, an error) keeps it open.
+  const closed = results.length > 0 && results.every((item) => item.status === "complete");
+  const metadata = site.metadata && typeof site.metadata === "object" && !Array.isArray(site.metadata) ? (site.metadata as Record<string, unknown>) : {};
+  await prisma.energySite.update({
+    where: { id: site.id },
+    data: {
+      metadata: {
+        ...metadata,
+        historyClosedAt: closed ? now.toISOString() : null,
+        historyUnavailable: unavailable.slice(0, 200) as unknown as Prisma.InputJsonValue,
+      },
+    },
+  });
+  await prisma.auditLog.create({ data: { actorUserId: userId, action: "ENERGY_HISTORY_BACKFILL_REQUESTED", entityType: "EnergySite", entityId: String(site.id), metadata: { trigger, results, closed, unavailableWindows: unavailable.length } } });
+  return { requested: results.filter((item) => item.status === "queued").length, closed, results };
+}
+
+export type HistoryUnavailableWindow = { from: string; to: string; reason: string; inverterId?: number };
+
+/** What the backend recorded as closed for this site, if anything. */
+export function siteHistoryClosure(metadata: unknown): { closedAt: Date; unavailable: HistoryUnavailableWindow[] } | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  if (typeof record.historyClosedAt !== "string") return null;
+  const closedAt = new Date(record.historyClosedAt);
+  if (Number.isNaN(closedAt.getTime())) return null;
+  const unavailable = Array.isArray(record.historyUnavailable)
+    ? record.historyUnavailable
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .filter((item) => typeof item.from === "string" && typeof item.to === "string")
+        .map((item) => ({ from: String(item.from), to: String(item.to), reason: typeof item.reason === "string" ? item.reason : "cloud_empty" }))
+    : [];
+  return { closedAt, unavailable };
 }
 
 /**
@@ -540,20 +578,27 @@ export async function requestBackendHistoryBackfill(userId: number, siteId: numb
  * its gaps and import again. Returns what happened so the page can say it.
  */
 export async function refreshSiteHistoryIfSparse(userId: number, siteId: number, trigger: "VISIT" | "SCHEDULE" | "MANUAL", now = new Date()) {
-  const site = await prisma.energySite.findFirst({ where: { id: siteId, userId, provider: EnergyProvider.LEGACY_SPOTTEX }, select: { id: true } });
+  const site = await prisma.energySite.findFirst({ where: { id: siteId, userId, provider: EnergyProvider.LEGACY_SPOTTEX }, select: { id: true, metadata: true } });
   if (!site) return { status: "NOT_APPLICABLE" as const };
   const quality = await getEnergyDataQuality(userId, siteId);
   if (quality.coverageDays >= 1 && quality.coveragePercent >= SPARSE_REQUEUE_COVERAGE_PERCENT) return { status: "COMPLETE" as const };
+  // Closed: the cloud has nothing more. Only an explicit request checks again.
+  if (trigger !== "MANUAL" && siteHistoryClosure(site.metadata)) return { status: "CLOSED" as const };
   const latest = await prisma.energyHistoryImport.findFirst({ where: { energySiteId: siteId }, orderBy: { createdAt: "desc" }, select: { status: true, createdAt: true } });
   if (latest && ["QUEUED", "RUNNING"].includes(latest.status)) return { status: "RUNNING" as const };
   if (latest && trigger !== "MANUAL" && now.getTime() - latest.createdAt.getTime() < ACTIVE_RETRY_MIN_AGE_MS) return { status: "RECENT" as const };
   let backfillRequested = 0;
+  let closed = false;
   try {
-    backfillRequested = (await requestBackendHistoryBackfill(userId, siteId, trigger)).requested;
+    const backfill = await requestBackendHistoryBackfill(userId, siteId, trigger, now);
+    backfillRequested = backfill.requested;
+    closed = backfill.closed;
   } catch {
     /* best effort */
   }
+  // Even a closed site imports once more, so whatever the backend already
+  // holds reaches the platform before the retries stop.
   await requestHistoryImport(userId, siteId);
-  return { status: "REQUESTED" as const, backfillRequested };
+  return { status: "REQUESTED" as const, backfillRequested, closed };
 }
 

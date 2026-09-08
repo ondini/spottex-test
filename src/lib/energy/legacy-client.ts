@@ -408,7 +408,13 @@ export class LegacySpottexClient {
    * its SolaX history never filled. Idempotent on the backend side; the
    * response only says whether it was queued and how much is missing.
    */
-  async requestHistoryBackfill(deviceId: string): Promise<{ status: string; missing: string | null; gaps: string[] }> {
+  async requestHistoryBackfill(deviceId: string): Promise<{
+    status: string;
+    missing: string | null;
+    gaps: string[];
+    // Windows the cloud answered correctly but empty: nothing to download there.
+    unavailable: Array<{ from: string; to: string; reason: string }>;
+  }> {
     if (!this.tokens) {
       throw new EnergyError("CONNECTION_NOT_FOUND", "Energetický účet není připojen.", 409);
     }
@@ -431,10 +437,18 @@ export class LegacySpottexClient {
         payload = {};
       }
       const gaps = Array.isArray(payload.gaps) ? payload.gaps.filter((item): item is string => typeof item === "string").slice(0, 40) : [];
+      const unavailable = Array.isArray(payload.unavailable)
+        ? payload.unavailable
+            .map((item) => asObject(item))
+            .filter((item) => typeof item.from === "string" && typeof item.to === "string")
+            .map((item) => ({ from: String(item.from), to: String(item.to), reason: typeof item.reason === "string" ? item.reason : "cloud_empty" }))
+            .slice(0, 200)
+        : [];
       return {
         status: typeof payload.status === "string" ? payload.status : "unknown",
         missing: typeof payload.missing === "string" ? payload.missing : null,
         gaps,
+        unavailable,
       };
     };
     try {

@@ -11,6 +11,7 @@ import { buildAnalysisCompletionEmail } from "./completion-email";
 import { getCostsCatalogSummary } from "@/lib/costs/client";
 import { getEnergyDataQuality } from "@/lib/energy/data-quality";
 import { aggregateHistoryProgressBySite } from "@/lib/energy/history-progress";
+import { siteHistoryClosure } from "@/lib/energy/history-import";
 import { describeHistoryStatus } from "@/lib/energy/history-status";
 import { prepareAnalysisDefaults } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
@@ -48,6 +49,12 @@ import {
 } from "./load-profile";
 import { calculateInvestmentAssessment } from "./investment";
 import { selectAnalysisCurveIds } from "./curve-selection";
+import {
+  ANNUAL_MINIMUM_DAYS,
+  chooseEvaluationWindow,
+  evaluationPeriodLabel,
+  periodFactor,
+} from "./evaluation-window";
 import {
   hasMaterialUnservedEnergy,
   unservedEnergyToleranceKwh,
@@ -478,6 +485,30 @@ export async function getAnalysisWorkspace(
       ),
     ),
   );
+  // The period the latest completed run reports; below a year the page shows
+  // the measured totals of exactly that period instead of annualized ones.
+  type SitePeriod = { annual: boolean; label: string; consumptionKwh: number | null; productionKwh: number | null; days: number | null };
+  const noPeriod: SitePeriod = { annual: true, label: "rok", consumptionKwh: null, productionKwh: null, days: null };
+  const periodBySite = new Map<number, SitePeriod>(
+    await Promise.all(
+      sites.map(async (site): Promise<readonly [number, SitePeriod]> => {
+        const run = site.analysisRuns.find((item) => item.status === "COMPLETED" && item.dataFrom && item.dataTo) ?? null;
+        const period = run ? runPeriod(run) : null;
+        if (!run || !period || period.annual || !run.dataFrom || !run.dataTo) return [site.id, noPeriod];
+        const measured = await getEnergyDataQuality(userId, site.id, { window: { from: run.dataFrom, to: run.dataTo } });
+        return [
+          site.id,
+          {
+            annual: false,
+            label: period.label,
+            consumptionKwh: measured.measuredConsumptionKwh,
+            productionKwh: measured.measuredProductionKwh,
+            days: measured.coverageDays,
+          },
+        ];
+      }),
+    ),
+  );
   const [
     fundingVersions,
     publishedProductVersions,
@@ -644,6 +675,7 @@ export async function getAnalysisWorkspace(
         running: runningProgress,
         lastViewedAt:
           typeof lastViewedAtRaw === "string" ? new Date(lastViewedAtRaw) : null,
+        closed: siteHistoryClosure(site.metadata),
       });
       return {
         id: site.id,
@@ -652,6 +684,7 @@ export async function getAnalysisWorkspace(
         historyImport: runningProgress,
         historyStatus,
         dataQuality,
+        period: periodBySite.get(site.id) ?? noPeriod,
         ready: blockers.length === 0,
         blockers,
         priceCurveWarnings: priceCurveWarningMessages(
@@ -710,6 +743,7 @@ export async function getAnalysisWorkspace(
           completedAt: run.completedAt?.toISOString() ?? null,
           dataFrom: run.dataFrom?.toISOString() ?? null,
           dataTo: run.dataTo?.toISOString() ?? null,
+          period: runPeriod(run),
           proPriceMinor: run.proPriceMinor,
           billablePointCount: run.billablePointCount,
           compareAllTariffs: object(run.inputs).compareAllTariffs === true,
@@ -1023,8 +1057,15 @@ export async function enqueueAnalysis(userId: number, raw: unknown) {
     await latestPublishedMarketSeries(),
   );
   if (window.empty) throw new Error("ANALYSIS_HISTORY_INSUFFICIENT");
-  const dataFrom = window.from;
-  const dataTo = window.to;
+  // Below ten months of measurements the run covers the complete calendar
+  // months only and reports that period exactly instead of scaling it to a year.
+  const evaluation = chooseEvaluationWindow({
+    window: { from: window.from, to: window.to },
+    coverageDays: quality.coverageDays,
+    monthlyCoverage: quality.monthlyCoverage,
+  });
+  const dataFrom = evaluation.from;
+  const dataTo = evaluation.to;
   const curveMaterialization = await ensurePublishedCatalogCurvesForSite(
     userId,
     site.id,
@@ -2200,10 +2241,13 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
         grant: investmentTerms.grant,
         loan: investmentTerms.loan,
       });
+    // A payback needs annual savings; below ten months of measurements the
+    // savings are known only for the measured period, so no payback is claimed.
     const investmentAssessment =
       investmentCapexCzk == null ||
       isCurrentHardware(scenario) ||
-      !todayReference
+      !todayReference ||
+      computed.evaluatedDays < ANNUAL_MINIMUM_DAYS
         ? null
         : (() => {
             const vsCurrentControl = assessAgainst(todayReference);
@@ -2448,6 +2492,7 @@ async function executeRun(runId: string, onProgress?: () => Promise<void>) {
       dataTo: run.dataTo,
       confidence: run.confidence,
       currentControlMode,
+      period: runPeriod({ dataFrom: run.dataFrom, dataTo: run.dataTo, scenarios: completedScenarios }),
       scenarios: completedScenarios.map((scenario) => {
         const assessment = object(
           object(scenario.assumptions).investmentAssessment as Prisma.JsonValue,
@@ -2917,4 +2962,32 @@ export async function cancelQueuedAnalysis(userId: number, runId: string) {
     });
     return { id: run.id, status: "SUPERSEDED" as const };
   });
+}
+
+/**
+ * Which period a run reports. The engine annualizes every cost with
+ * 365 / evaluatedDays; below ten months of measurements the customer wants the
+ * measured period itself, so the UI and e-mail scale back with `factor`.
+ */
+function runPeriod(run: {
+  dataFrom: Date | null;
+  dataTo: Date | null;
+  scenarios: Array<{ assumptions: Prisma.JsonValue }>;
+}) {
+  const evaluatedDays = run.scenarios.reduce((max, scenario) => {
+    const value = object(scenario.assumptions).evaluatedDays;
+    return typeof value === "number" && value > max ? value : max;
+  }, 0);
+  const windowDays =
+    run.dataFrom && run.dataTo
+      ? (run.dataTo.getTime() - run.dataFrom.getTime()) / 86_400_000
+      : 0;
+  const days = evaluatedDays || windowDays;
+  const annual = days >= ANNUAL_MINIMUM_DAYS;
+  return {
+    annual,
+    label: evaluationPeriodLabel({ annual, from: run.dataFrom, to: run.dataTo }),
+    evaluatedDays: Math.round(days * 10) / 10,
+    factor: periodFactor(annual, days),
+  };
 }
