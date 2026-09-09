@@ -86,6 +86,18 @@ export type EnergyDashboardSnapshot = {
   savings: EnergySavings;
   schedule: EnergyScheduleItem[];
   history: EnergyHistoryStatus;
+  // What the backend's optimizer and broadcaster last did, per inverter,
+  // while control runs; null when the backend database is not reachable.
+  controlActivity?: EnergyControlActivity[] | null;
+};
+
+export type EnergyControlActivity = {
+  inverterId: number;
+  deviceId: string;
+  lastRun: { finishedAt: string; status: string; costCzk: number | null; planUntil: string | null } | null;
+  lastCommand: { command: string; at: string } | null;
+  scheduleUpdatedAt: string | null;
+  optimizationRunning: boolean | null;
 };
 
 export type EnergyHistoryStatus = {

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { apiUser } from "@/lib/auth/guards";
 import { energyErrorResponse, noStoreJson } from "@/lib/energy/http";
+import { siteControlActivity } from "@/lib/energy/control-activity";
 import { getEnergyDashboard } from "@/lib/energy/service";
 import { LegacySpottexClient } from "@/lib/energy/legacy-client";
 import { EnergyError } from "@/lib/energy/types";
@@ -19,7 +20,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const snapshot = await getEnergyDashboard(Number(session.user.id), siteId);
+    const userId = Number(session.user.id);
+    const snapshot = await getEnergyDashboard(userId, siteId);
+    // While control runs, say what the backend last planned and sent.
+    const selected = snapshot.sites.find((site) => site.id === snapshot.selectedSiteId);
+    if (selected?.optimizationOn) {
+      snapshot.controlActivity = await siteControlActivity(userId, snapshot.selectedSiteId);
+    }
     return noStoreJson({ snapshot });
   } catch (error) {
     if (error instanceof EnergyError && error.code === "NO_SITES") {
