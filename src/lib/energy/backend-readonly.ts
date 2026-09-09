@@ -77,8 +77,10 @@ export async function backendControlActivity(deviceIds: string[]): Promise<Backe
       [ids],
     ),
   ]);
-  // device_schedule.time_* are naive local times; interval_to of a run is too.
-  const localToIso = (value: Date | null) => (value ? new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString() : null);
+  // interval_to of a run is a naive Europe/Prague wall-clock time; pg parsed it
+  // in this process's zone (UTC in the container), so re-read its fields as
+  // Prague time to get the real instant.
+  const localToIso = (value: Date | null) => (value ? pragueWallClockToInstant(value).toISOString() : null);
   // device_id is a bigint in the backend, which pg hands over as a string.
   const same = (row: { device_id: number | string }, id: number) => Number(row.device_id) === id;
   return ids.map((id) => {
@@ -101,4 +103,18 @@ export async function backendControlActivity(deviceIds: string[]): Promise<Backe
       optimizationRunning: inverter?.optimization_running ?? null,
     };
   });
+}
+
+const PRAGUE = "Europe/Prague";
+
+function pragueOffsetMs(at: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: PRAGUE, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(at);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return Date.UTC(value("year"), value("month") - 1, value("day"), value("hour"), value("minute"), value("second")) - at.getTime();
+}
+
+/** A Date whose UTC fields hold a Prague wall-clock time, turned into the instant. */
+export function pragueWallClockToInstant(wall: Date) {
+  const guess = new Date(wall.getTime() - pragueOffsetMs(wall));
+  return new Date(wall.getTime() - pragueOffsetMs(guess));
 }
