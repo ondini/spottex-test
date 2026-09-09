@@ -55,35 +55,37 @@ export async function backendControlActivity(deviceIds: string[]): Promise<Backe
   const ids = deviceIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
   if (!pool || !ids.length) return null;
   const [runs, commands, schedules, inverters] = await Promise.all([
-    pool.query<{ device_id: number; finished_at: Date | null; started_at: Date; status: string; cost_czk: string | null; interval_to: Date | null }>(
+    pool.query<{ device_id: number | string; finished_at: Date | null; started_at: Date; status: string; cost_czk: string | null; interval_to: Date | null }>(
       `SELECT DISTINCT ON (device_id) device_id, started_at, finished_at, status, cost_czk, interval_to
          FROM control.optimization_runs WHERE device_id = ANY($1::int[])
          ORDER BY device_id, started_at DESC`,
       [ids],
     ),
-    pool.query<{ device_id: number; command: string; created_at: Date }>(
+    pool.query<{ device_id: number | string; command: string; created_at: Date }>(
       `SELECT DISTINCT ON (device_id) device_id, command, created_at
          FROM control.control_commands WHERE device_id = ANY($1::int[])
          ORDER BY device_id, created_at DESC`,
       [ids],
     ),
-    pool.query<{ device_id: number; updated_at: Date | null }>(
+    pool.query<{ device_id: number | string; updated_at: Date | null }>(
       `SELECT device_id, MAX(created_at) AS updated_at FROM control.device_schedule
          WHERE device_id = ANY($1::int[]) GROUP BY device_id`,
       [ids],
     ),
-    pool.query<{ device_id: number; optimization_running: boolean | null }>(
+    pool.query<{ device_id: number | string; optimization_running: boolean | null }>(
       `SELECT device_id, optimization_running FROM general.inverters WHERE device_id = ANY($1::int[])`,
       [ids],
     ),
   ]);
   // device_schedule.time_* are naive local times; interval_to of a run is too.
   const localToIso = (value: Date | null) => (value ? new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString() : null);
+  // device_id is a bigint in the backend, which pg hands over as a string.
+  const same = (row: { device_id: number | string }, id: number) => Number(row.device_id) === id;
   return ids.map((id) => {
-    const run = runs.rows.find((row) => row.device_id === id) ?? null;
-    const command = commands.rows.find((row) => row.device_id === id) ?? null;
-    const schedule = schedules.rows.find((row) => row.device_id === id) ?? null;
-    const inverter = inverters.rows.find((row) => row.device_id === id) ?? null;
+    const run = runs.rows.find((row) => same(row, id)) ?? null;
+    const command = commands.rows.find((row) => same(row, id)) ?? null;
+    const schedule = schedules.rows.find((row) => same(row, id)) ?? null;
+    const inverter = inverters.rows.find((row) => same(row, id)) ?? null;
     return {
       deviceId: String(id),
       lastRun: run
