@@ -6,6 +6,7 @@ import { PageHeader, StatusBadge } from "@/components/app-shell/PagePrimitives";
 import { ControlSiteCard } from "@/components/energy/ControlSiteCard";
 import { requireUser } from "@/lib/auth/guards";
 import { hasInverterControlEntitlement } from "@/lib/commerce/entitlement";
+import { freeAccessEnabled } from "@/lib/commerce/free-access";
 import { getLocalControlReadiness } from "@/lib/energy/technical-profile";
 import { prisma } from "@/lib/prisma";
 
@@ -44,9 +45,9 @@ export default async function ControlPage() {
     <section className="grid gap-4 md:grid-cols-3">
       <StepCard number="1" title="Technické údaje" done={controlSites.length > 0 && controlSites.every((site) => site.controlReady)} description="Limity sítě, střídače, baterie a skutečné ceny musí být vyplněné." />
       <StepCard number="2" title="Analýza úspor" done={false} description="Porovnáme self-use a chytré řízení při stejných cenách." />
-      <StepCard number="3" title="Roční služba" done={Boolean(entitled)} description="Před aktivací ukážeme konečnou cenu a podmínky služby." />
+      <StepCard number="3" title="Roční služba" done={Boolean(entitled)} description={freeAccessEnabled() ? "Služba je zdarma a aktivuje se spolu se zapnutím řízení." : "Před aktivací ukážeme konečnou cenu a podmínky služby."} />
     </section>
-    {sites.length === 0 ? <section className="app-card p-6 text-center"><BatteryCharging className="mx-auto size-8 text-slate-400" /><h2 className="mt-4 font-semibold text-slate-900">Nejdříve připojte elektrárnu</h2><Link href="/app/dashboard" className="app-button mt-5">Přejít na přehled <ArrowRight className="size-4" /></Link></section> : <section className="space-y-4">{controlSites.map((site) => <ControlSiteCard key={site.id} site={site} entitled={Boolean(entitled)} />)}</section>}
+    {sites.length === 0 ? <section className="app-card p-6 text-center"><BatteryCharging className="mx-auto size-8 text-slate-400" /><h2 className="mt-4 font-semibold text-slate-900">Nejdříve připojte elektrárnu</h2><Link href="/app/dashboard" className="app-button mt-5">Přejít na přehled <ArrowRight className="size-4" /></Link></section> : <section className="space-y-4">{controlSites.map((site) => <ControlSiteCard key={site.id} site={site} entitled={Boolean(entitled)} freeAccess={freeAccessEnabled()} />)}</section>}
     <p className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"><AlertTriangle className="mt-1 size-4 shrink-0" /> Zapnutí zůstává zablokované, dokud nejsou potvrzené síťové a bateriové limity. Obchodní aktivace sama nikdy nezapne střídač.</p>
   </div>;
 }

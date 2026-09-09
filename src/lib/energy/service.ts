@@ -145,6 +145,17 @@ export async function getEnergyDashboard(
   });
   const selected = selectOwnedSite(sites, userId, requestedSiteId);
   const summaries = sites.map(siteSummary);
+  // The dashboard says since when a plant is controlled: the last switch-on
+  // the inverters acknowledged.
+  await Promise.all(summaries.map(async (summary, index) => {
+    if (!summary.optimizationOn) return;
+    const command = await prisma.inverterCommand.findFirst({
+      where: { inverterId: { in: sites[index].inverters.map((item) => item.id) }, type: "turnon", status: "ACKNOWLEDGED" },
+      orderBy: { requestedAt: "desc" },
+      select: { completedAt: true, requestedAt: true },
+    });
+    summary.controlSince = (command?.completedAt ?? command?.requestedAt)?.toISOString() ?? null;
+  }));
   const inverter = selected.inverters[0];
   if (!inverter) {
     throw new EnergyError("INVERTER_NOT_FOUND", "K elektrárně zatím není připojen střídač.", 404);

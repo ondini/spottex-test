@@ -22,6 +22,8 @@ export type EnergySiteSummary = {
   optimizationOn: boolean;
   requiredInfo: boolean;
   lastSyncedAt: string | null;
+  // When the running control was confirmed by the inverters, for the dashboard.
+  controlSince?: string | null;
 };
 
 export type EnergyCurrentValues = {
