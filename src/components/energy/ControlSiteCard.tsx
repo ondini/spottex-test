@@ -6,10 +6,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { StatusBadge } from "@/components/app-shell/PagePrimitives";
+import { activateFreeControlService } from "@/components/commerce/activate-free-service";
 
 export function ControlSiteCard({
   site,
   entitled,
+  freeAccess,
 }: {
   site: {
     id: number;
@@ -20,19 +22,31 @@ export function ControlSiteCard({
     inverterCount: number;
   };
   entitled: boolean;
+  // Free-access mode: the service is activated in the same step as the
+  // switch-on, so the owner never has to find the order page first.
+  freeAccess: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const inverters = `${site.inverterCount} ${site.inverterCount === 1 ? "střídači" : "střídačích"}`;
 
   async function toggleControl() {
     const turningOn = !site.optimizationOn;
+    const activating = turningOn && !entitled && freeAccess;
     if (turningOn && !window.confirm(
-      `Zapnout optimální řízení elektrárny ${site.name} na všech ${site.inverterCount} střídačích?`,
+      activating
+        ? `Aktivovat službu zdarma a zapnout optimální řízení elektrárny ${site.name} na ${inverters}?`
+        : `Zapnout optimální řízení elektrárny ${site.name} na ${inverters}?`,
     )) return;
     setPending(true);
     setMessage(null);
     try {
+      if (activating) {
+        setMessage("Aktivuji službu…");
+        await activateFreeControlService();
+        setMessage("Služba je aktivní, zapínám řízení…");
+      }
       const idempotencyKey = crypto.randomUUID();
       const response = await fetch(`/api/app/energy/sites/${site.id}/commands`, {
         method: "POST",
@@ -44,9 +58,12 @@ export function ControlSiteCard({
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Příkaz se nepodařilo potvrdit.");
-      setMessage(turningOn
-        ? "Řízení potvrdily všechny střídače elektrárny."
-        : "Všechny střídače potvrdily návrat do self-use režimu.");
+      if (turningOn) {
+        // The plant is running: show it where the owner watches it, not here.
+        router.push(`/app/dashboard?siteId=${site.id}`);
+        return;
+      }
+      setMessage("Všechny střídače potvrdily návrat do self-use režimu.");
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Příkaz se nepodařilo potvrdit.");
@@ -79,7 +96,7 @@ export function ControlSiteCard({
       <Link href={`/app/elektrarna?siteId=${site.id}&intent=control`} className="app-button app-button-secondary">
         Zkontrolovat údaje
       </Link>
-      {entitled ? <button
+      {entitled || freeAccess ? <button
         type="button"
         className="app-button"
         disabled={pending || (!site.controlReady && !site.optimizationOn)}
@@ -87,7 +104,7 @@ export function ControlSiteCard({
       >
         {pending ? <LoaderCircle className="size-4 animate-spin" /> : null}
         {site.optimizationOn ? "Vypnout řízení" : "Zapnout řízení"}
-      </button> : <Link href="/app/sluzba" className="app-button">Aktivovat službu zdarma</Link>}
+      </button> : <Link href="/app/sluzba/objednavka" className="app-button">Objednat službu</Link>}
     </div>
   </article>;
 }

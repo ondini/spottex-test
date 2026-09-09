@@ -822,7 +822,13 @@ export function EnergyDashboard() {
               <StatusBadge tone={snapshot.source === "LIVE" ? "brand" : "neutral"}>
                 {snapshot.source === "LIVE" ? "Reálná data" : "Uložená data"}
               </StatusBadge>
-              {optimizationOn && <StatusBadge tone="success">Řídíme</StatusBadge>}
+              {optimizationOn && (
+                <StatusBadge tone="success">
+                  {selectedSite?.controlSince
+                    ? `Řídíme od ${new Intl.DateTimeFormat("cs-CZ", { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedSite.controlSince))}`
+                    : "Řídíme"}
+                </StatusBadge>
+              )}
             </div>
             <p className="mt-1 text-sm text-slate-500">
               {snapshot.dataAsOf
@@ -843,10 +849,17 @@ export function EnergyDashboard() {
             >
               Spočítat úspory
             </Link>
-            <Link className="app-button" href={controlHref}>
-              <Zap className="size-4" />
-              Zapnout řízení
-            </Link>
+            {optimizationOn ? (
+              <Link className="app-button app-button-secondary" href={`/app/rizeni?siteId=${snapshot.selectedSiteId}`}>
+                <Zap className="size-4" />
+                Řízení běží
+              </Link>
+            ) : (
+              <Link className="app-button" href={controlHref}>
+                <Zap className="size-4" />
+                Zapnout řízení
+              </Link>
+            )}
           </div>
         </div>
         {(historyImporting || history.totalChunks > 0) && (

@@ -15,6 +15,8 @@ import {
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { activateFreeControlService } from "@/components/commerce/activate-free-service";
+
 import { PageHeader, StatusBadge } from "@/components/app-shell/PagePrimitives";
 import type {
   SimulationJobView,
@@ -284,21 +286,8 @@ function FreeTrialButton() {
     setPending(true);
     setError(null);
     try {
-      const cartResponse = await fetch("/api/cart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productCode: "INVERTER_CONTROL", quantity: 1 }),
-      });
-      const cartPayload = (await cartResponse.json().catch(() => ({}))) as { cart?: { id: string }; error?: string };
-      if (!cartResponse.ok || !cartPayload.cart) throw new Error(cartPayload.error || "Aktivaci se nepodařilo připravit.");
-      const checkoutResponse = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cartId: cartPayload.cart.id }),
-      });
-      const checkout = (await checkoutResponse.json().catch(() => ({}))) as { redirectUrl?: string; error?: string };
-      if (!checkoutResponse.ok || !checkout.redirectUrl) throw new Error(checkout.error || "Aktivaci se nepodařilo dokončit.");
-      window.location.assign(checkout.redirectUrl);
+      const checkout = await activateFreeControlService();
+      window.location.assign(checkout.redirectUrl ?? "/app/rizeni");
     } catch (caught) {
       const code = caught instanceof Error ? caught.message : "";
       setError(code || "Aktivaci se nepodařilo dokončit.");
