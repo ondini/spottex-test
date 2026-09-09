@@ -320,9 +320,15 @@ Host vývoj používá `DATABASE_URL` a SMTP port z `.env.example`, tedy Postgre
 ### Spotové ceny a centrální katalog
 
 - `SPOTTEX_BACKEND_DATABASE_URL` musí patřit samostatné PostgreSQL roli s
-  `CONNECT`, `USAGE` na schématu `control` a pouze `SELECT` na
+  `CONNECT`, `USAGE` na schématech `control` a `general` a pouze `SELECT` na
   `control.ote_prices_15min`. Aplikace čte příznak `prediction`; potvrzené a
-  budoucí hodnoty ukládá odděleně do verzované lokální řady.
+  budoucí hodnoty ukládá odděleně do verzované lokální řady. Stejná role čte
+  pro sekci „Plán řízení“ na přehledu a pro audit řízení v administraci živý
+  stav řízení, a to jen po sloupcích: `control.optimization_runs (device_id,
+  started_at, finished_at, status, cost_czk, interval_to)`,
+  `control.control_commands (device_id, command, created_at)`,
+  `control.device_schedule (device_id, created_at)` a `general.inverters
+  (device_id, optimization_running)`. Bez těchto grantů se sekce jen nezobrazí.
 - `COSTS_INTERNAL_API_URL` a `COSTS_INTERNAL_API_KEY` připojují read-only Costs
   API. Spottex ukládá ID upstream snapshotu a archivovaný zdroj každého
   importovaného návrhu.
