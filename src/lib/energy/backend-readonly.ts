@@ -1,0 +1,102 @@
+import "server-only";
+
+import { Pool } from "pg";
+
+// One read-only connection pool to the energy backend's PostgreSQL. The role
+// behind SPOTTEX_BACKEND_DATABASE_URL may only read; market prices and the
+// live control activity are copied or shown from here, nothing is written.
+
+type GlobalWithBackendPool = typeof globalThis & {
+  spottexBackendReadonlyPool?: Pool;
+};
+
+export function backendDatabaseUrl() {
+  const raw = process.env.SPOTTEX_BACKEND_DATABASE_URL?.trim();
+  if (!raw) return null;
+  const parsed = new URL(raw);
+  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
+    throw new Error("SPOTTEX_BACKEND_DATABASE_URL_INVALID");
+  }
+  return raw;
+}
+
+export function backendReadonlyPool() {
+  const connectionString = backendDatabaseUrl();
+  if (!connectionString) return null;
+  const state = globalThis as GlobalWithBackendPool;
+  state.spottexBackendReadonlyPool ??= new Pool({
+    connectionString,
+    max: 2,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 30_000,
+    query_timeout: 30_000,
+    allowExitOnIdle: true,
+    application_name: "spottex-platform-readonly",
+  });
+  return state.spottexBackendReadonlyPool;
+}
+
+export type BackendControlActivity = {
+  deviceId: string;
+  lastRun: { finishedAt: string; status: string; costCzk: number | null; planUntil: string | null } | null;
+  lastCommand: { command: string; at: string } | null;
+  scheduleUpdatedAt: string | null;
+  optimizationRunning: boolean | null;
+};
+
+/**
+ * What the backend's optimizer and control broadcaster last did for the
+ * given backend device ids: the newest optimization run, the newest command
+ * handed to the inverter and when the schedule was last rewritten. Read-only.
+ */
+export async function backendControlActivity(deviceIds: string[]): Promise<BackendControlActivity[] | null> {
+  const pool = backendReadonlyPool();
+  const ids = deviceIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+  if (!pool || !ids.length) return null;
+  const [runs, commands, schedules, inverters] = await Promise.all([
+    pool.query<{ device_id: number; finished_at: Date | null; started_at: Date; status: string; cost_czk: string | null; interval_to: Date | null }>(
+      `SELECT DISTINCT ON (device_id) device_id, started_at, finished_at, status, cost_czk, interval_to
+         FROM control.optimization_runs WHERE device_id = ANY($1::int[])
+         ORDER BY device_id, started_at DESC`,
+      [ids],
+    ),
+    pool.query<{ device_id: number; command: string; created_at: Date }>(
+      `SELECT DISTINCT ON (device_id) device_id, command, created_at
+         FROM control.control_commands WHERE device_id = ANY($1::int[])
+         ORDER BY device_id, created_at DESC`,
+      [ids],
+    ),
+    pool.query<{ device_id: number; updated_at: Date | null }>(
+      `SELECT device_id, MAX(created_at) AS updated_at FROM control.device_schedule
+         WHERE device_id = ANY($1::int[]) GROUP BY device_id`,
+      [ids],
+    ),
+    pool.query<{ device_id: number; optimization_running: boolean | null }>(
+      `SELECT device_id, optimization_running FROM general.inverters WHERE device_id = ANY($1::int[])`,
+      [ids],
+    ),
+  ]);
+  // device_schedule.time_* are naive local times; interval_to of a run is too.
+  const localToIso = (value: Date | null) => (value ? new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString() : null);
+  return ids.map((id) => {
+    const run = runs.rows.find((row) => row.device_id === id) ?? null;
+    const command = commands.rows.find((row) => row.device_id === id) ?? null;
+    const schedule = schedules.rows.find((row) => row.device_id === id) ?? null;
+    const inverter = inverters.rows.find((row) => row.device_id === id) ?? null;
+    return {
+      deviceId: String(id),
+      lastRun: run
+        ? {
+            finishedAt: (run.finished_at ?? run.started_at).toISOString(),
+            status: run.status,
+            costCzk: run.cost_czk == null ? null : Number(run.cost_czk),
+            planUntil: localToIso(run.interval_to),
+          }
+        : null,
+      lastCommand: command ? { command: command.command, at: command.created_at.toISOString() } : null,
+      scheduleUpdatedAt: schedule?.updated_at?.toISOString() ?? null,
+      optimizationRunning: inverter?.optimization_running ?? null,
+    };
+  });
+}

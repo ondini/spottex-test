@@ -537,6 +537,38 @@ export default async function ControlAuditPage({
               </div>
             ))}
           </div>
+          <div className="border-t border-slate-100 px-6 py-5">
+            <h3 className="text-sm font-semibold text-slate-900">Živé řízení v backendu</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Přímo z databáze backendu: zda optimalizace pro střídač běží, kdy proběhl poslední přepočet plánu a jaký povel odešel naposledy.
+            </p>
+            {audit.liveControl === null ? (
+              <p className="mt-3 text-sm text-slate-500">Databáze backendu není z této instance dostupná.</p>
+            ) : audit.liveControl.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">Elektrárna nemá střídač napojený na backend.</p>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <tr><th className="py-2 pr-4">Střídač</th><th className="py-2 pr-4">Optimalizace</th><th className="py-2 pr-4">Poslední přepočet</th><th className="py-2 pr-4">Plán do</th><th className="py-2 pr-4">Náklad horizontu</th><th className="py-2 pr-4">Poslední povel</th><th className="py-2">Plán přepsán</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {audit.liveControl.map((item) => (
+                      <tr key={item.inverterId}>
+                        <td className="py-2 pr-4 font-mono text-xs text-slate-600">{item.deviceId}</td>
+                        <td className="py-2 pr-4"><StatusBadge tone={item.optimizationRunning ? "success" : "neutral"}>{item.optimizationRunning ? "běží" : item.optimizationRunning === false ? "neběží" : "neznámo"}</StatusBadge></td>
+                        <td className="py-2 pr-4 text-slate-700">{item.lastRun ? `${formatDate(item.lastRun.finishedAt)} · ${item.lastRun.status}` : "—"}</td>
+                        <td className="py-2 pr-4 text-slate-700">{formatDate(item.lastRun?.planUntil ?? null)}</td>
+                        <td className="py-2 pr-4 text-slate-700">{formatNumber(item.lastRun?.costCzk ?? null, " Kč")}</td>
+                        <td className="py-2 pr-4 text-slate-700">{item.lastCommand ? `${item.lastCommand.command} · ${formatDate(item.lastCommand.at)}` : "—"}</td>
+                        <td className="py-2 text-slate-700">{formatDate(item.scheduleUpdatedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </article>
       </section>
 

@@ -7,6 +7,7 @@ import {
   getEnergyDataQuality,
   type EnergyDataQuality,
 } from "@/lib/energy/data-quality";
+import { siteControlActivity } from "@/lib/energy/control-activity";
 import { prisma } from "@/lib/prisma";
 import {
   MS_VETRNIK_REPLAY,
@@ -96,6 +97,15 @@ export type ControlAudit = {
     latestScheduleAt: string | null;
     latestCommandAt: string | null;
   };
+  // Straight from the backend: what its optimizer and broadcaster last did.
+  liveControl: Array<{
+    inverterId: number;
+    deviceId: string;
+    optimizationRunning: boolean | null;
+    lastRun: { finishedAt: string; status: string; costCzk: number | null; planUntil: string | null } | null;
+    lastCommand: { command: string; at: string } | null;
+    scheduleUpdatedAt: string | null;
+  }> | null;
   tariff: {
     complete: boolean;
     missing: string[];
@@ -672,6 +682,7 @@ export async function getControlAudit(requestedSiteId?: number): Promise<Control
       : null,
   };
 
+  const liveControl = await siteControlActivity(site.userId, site.id);
   const control = {
     schedules: schedules.length,
     commands: commands.length,
@@ -884,6 +895,7 @@ export async function getControlAudit(requestedSiteId?: number): Promise<Control
         ? MS_VETRNIK_REPLAY
         : null,
     control,
+    liveControl,
     tariff: {
       complete: missingTariff.length === 0,
       missing: missingTariff,

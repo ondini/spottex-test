@@ -34,6 +34,7 @@ import {
   YAxis,
 } from "recharts";
 import Link from "next/link";
+import { describeControlPlan, isSelfUseMode } from "@/lib/energy/control-plan";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader, StatusBadge } from "@/components/app-shell/PagePrimitives";
@@ -902,6 +903,8 @@ export function EnergyDashboard() {
         </div>
       </section>
 
+      {optimizationOn && <ControlPlanSection snapshot={snapshot} />}
+
       <section className="app-card min-w-0 p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -990,4 +993,99 @@ export function EnergyDashboard() {
 
 function MetricCard({ icon: Icon, label, value, tone = "neutral" }: { icon: typeof SunMedium; label: string; value: string; tone?: "brand" | "neutral" }) {
   return <div className="app-card p-5"><div className="flex items-start justify-between gap-3"><span className={`grid size-10 place-items-center rounded-xl ${tone === "brand" ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600"}`}><Icon className="size-5" /></span><strong className="text-xl font-semibold text-slate-900">{value}</strong></div><p className="mt-4 text-sm font-medium text-slate-600">{label}</p></div>;
+}
+
+
+const timeFormat = new Intl.DateTimeFormat("cs-CZ", { timeZone: "Europe/Prague", weekday: "short", hour: "2-digit", minute: "2-digit" });
+const clockFormat = new Intl.DateTimeFormat("cs-CZ", { timeZone: "Europe/Prague", hour: "2-digit", minute: "2-digit" });
+
+function modeTone(mode: string) {
+  if (isSelfUseMode(mode)) return "bg-brand-500";
+  if (/nabíj|charge/i.test(mode)) return "bg-sky-500";
+  if (/vybíj|discharge/i.test(mode)) return "bg-violet-500";
+  if (/přetok|feed/i.test(mode)) return "bg-amber-500";
+  if (/vypnuto|off/i.test(mode)) return "bg-slate-400";
+  return "bg-slate-500";
+}
+
+/**
+ * What the control is doing: the mode now, the blocks ahead, and what the
+ * backend last planned and sent. With a single-rate tariff the whole plan is
+ * self-use, which is the optimum and would otherwise look like nothing.
+ */
+function ControlPlanSection({ snapshot }: { snapshot: EnergyDashboardSnapshot }) {
+  const now = new Date();
+  const plan = describeControlPlan(snapshot.schedule, now);
+  const blocks = [...(plan.current ? [plan.current] : []), ...plan.upcoming];
+  const horizonStart = plan.current ? Math.max(now.getTime(), new Date(plan.current.startAt).getTime()) : now.getTime();
+  const horizonEnd = plan.horizonEndAt ? new Date(plan.horizonEndAt).getTime() : horizonStart + 24 * 3_600_000;
+  const span = Math.max(1, horizonEnd - horizonStart);
+  const activity = snapshot.controlActivity ?? [];
+  const latestPlanAt = activity
+    .map((item) => item.scheduleUpdatedAt ?? item.lastRun?.finishedAt ?? null)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  return (
+    <section className="app-card min-w-0 p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-slate-900">Plán řízení</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {plan.current
+              ? `Teď ${plan.current.mode.toLowerCase()} do ${timeFormat.format(new Date(plan.current.endAt))}.`
+              : "Backend zatím nemá pro nejbližší hodiny žádný plán."}
+            {latestPlanAt ? ` Plán přepočítán ${clockFormat.format(new Date(latestPlanAt))}, přepočet běží každých 15 minut.` : ""}
+          </p>
+        </div>
+        <Zap className="size-5 text-brand-600" />
+      </div>
+      {blocks.length > 0 && (
+        <>
+          <div className="mt-5 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
+            {blocks.map((block) => {
+              const start = Math.max(horizonStart, new Date(block.startAt).getTime());
+              const end = Math.min(horizonEnd, new Date(block.endAt).getTime());
+              if (end <= start) return null;
+              return (
+                <span
+                  key={`${block.startAt}-${block.mode}`}
+                  className={`${modeTone(block.mode)} h-full`}
+                  style={{ width: `${((end - start) / span) * 100}%` }}
+                  title={`${block.mode}: ${timeFormat.format(new Date(block.startAt))} – ${timeFormat.format(new Date(block.endAt))}`}
+                />
+              );
+            })}
+          </div>
+          <ul className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+            {blocks.slice(0, 6).map((block) => (
+              <li key={`${block.startAt}-${block.mode}-row`} className="flex items-center gap-3">
+                <span className={`size-2.5 shrink-0 rounded-full ${modeTone(block.mode)}`} />
+                <span className="text-slate-700">
+                  {timeFormat.format(new Date(block.startAt))} – {timeFormat.format(new Date(block.endAt))}: <strong className="font-medium">{block.mode}</strong>
+                  {block.targetSocPct != null ? <span className="text-slate-500"> · cíl baterie {numberFormat.format(block.targetSocPct)} %</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {plan.allSelfUse && (
+        <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+          Celý plán je v režimu vlastní spotřeba: při vašich cenách se nabíjení ze sítě ani přednostní přetok nevyplatí, takže řízení nechává střídač spotřebovávat vlastní výrobu. Jakmile se to vyplatí, plán se změní sám.
+        </p>
+      )}
+      {activity.length > 0 && (
+        <ul className="mt-4 space-y-1 text-xs text-slate-500">
+          {activity.map((item) => (
+            <li key={item.inverterId}>
+              Střídač {item.deviceId}: {item.optimizationRunning === false ? "backend řízení neběží" : "řízení běží"}
+              {item.lastRun ? `, poslední přepočet ${clockFormat.format(new Date(item.lastRun.finishedAt))} (${item.lastRun.status === "OK" ? "v pořádku" : item.lastRun.status})` : ", zatím bez přepočtu"}
+              {item.lastCommand ? `, poslední povel ${item.lastCommand.command.replace("_", " ")} v ${clockFormat.format(new Date(item.lastCommand.at))}` : ", zatím bez povelu"}.
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }

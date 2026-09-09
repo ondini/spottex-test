@@ -1,7 +1,6 @@
 import "server-only";
 
-import { Pool } from "pg";
-
+import { backendReadonlyPool } from "@/lib/energy/backend-readonly";
 import { prisma } from "@/lib/prisma";
 
 import {
@@ -12,36 +11,7 @@ import {
 const BACKEND_MARKET_SOURCE =
   "spottex-backend-db://control.ote_prices_15min";
 
-type GlobalWithMarketPool = typeof globalThis & {
-  spottexBackendMarketPool?: Pool;
-};
-
-function configuredDatabaseUrl() {
-  const raw = process.env.SPOTTEX_BACKEND_DATABASE_URL?.trim();
-  if (!raw) return null;
-  const parsed = new URL(raw);
-  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
-    throw new Error("SPOTTEX_BACKEND_DATABASE_URL_INVALID");
-  }
-  return raw;
-}
-
-function backendPool() {
-  const connectionString = configuredDatabaseUrl();
-  if (!connectionString) return null;
-  const state = globalThis as GlobalWithMarketPool;
-  state.spottexBackendMarketPool ??= new Pool({
-    connectionString,
-    max: 2,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-    statement_timeout: 30_000,
-    query_timeout: 30_000,
-    allowExitOnIdle: true,
-    application_name: "spottex-market-readonly-sync",
-  });
-  return state.spottexBackendMarketPool;
-}
+const backendPool = backendReadonlyPool;
 
 export type BackendMarketSyncResult = {
   configured: boolean;
