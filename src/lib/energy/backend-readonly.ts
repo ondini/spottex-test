@@ -105,6 +105,61 @@ export async function backendControlActivity(deviceIds: string[]): Promise<Backe
   });
 }
 
+export type BackendControlSavings = {
+  deviceId: string;
+  dayCzk: number;
+  weekCzk: number;
+  monthCzk: number;
+  yearCzk: number;
+  intervals: Array<{ from: string; to: string; savingsCzk: number; productionKwh: number; consumptionKwh: number; otePriceCzkKwh: number | null }>;
+};
+
+/**
+ * What the control actually earned, as the backend measures it: the running
+ * day/week/month/year totals and the last hours interval by interval. Each
+ * interval compares the real grid flow with a simulated uncontrolled one.
+ */
+export async function backendControlSavings(deviceIds: string[], hours = 24): Promise<BackendControlSavings[] | null> {
+  const pool = backendReadonlyPool();
+  const ids = deviceIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+  if (!pool || !ids.length) return null;
+  const since = new Date(Date.now() - hours * 3_600_000);
+  const [summary, intervals] = await Promise.all([
+    pool.query<{ device_id: number | string; savings_day_czk: string | null; savings_week_czk: string | null; savings_month_czk: string | null; savings_year_czk: string | null }>(
+      `SELECT device_id, savings_day_czk, savings_week_czk, savings_month_czk, savings_year_czk
+         FROM control.device_savings_summary WHERE device_id = ANY($1::int[])`,
+      [ids],
+    ),
+    pool.query<{ device_id: number | string; time_from: Date; time_to: Date; savings_czk: string | null; production_kwh: string | null; consumption_kwh: string | null; ote_price_czk_kwh: string | null }>(
+      `SELECT device_id, time_from, time_to, savings_czk, production_kwh, consumption_kwh, ote_price_czk_kwh
+         FROM control.device_savings WHERE device_id = ANY($1::int[]) AND time_from >= $2
+         ORDER BY time_from`,
+      [ids, since],
+    ),
+  ]);
+  const number = (value: string | null) => (value == null ? 0 : Number(value));
+  return ids.map((id) => {
+    const row = summary.rows.find((item) => Number(item.device_id) === id) ?? null;
+    return {
+      deviceId: String(id),
+      dayCzk: number(row?.savings_day_czk ?? null),
+      weekCzk: number(row?.savings_week_czk ?? null),
+      monthCzk: number(row?.savings_month_czk ?? null),
+      yearCzk: number(row?.savings_year_czk ?? null),
+      intervals: intervals.rows
+        .filter((item) => Number(item.device_id) === id)
+        .map((item) => ({
+          from: pragueWallClockToInstant(item.time_from).toISOString(),
+          to: pragueWallClockToInstant(item.time_to).toISOString(),
+          savingsCzk: number(item.savings_czk),
+          productionKwh: number(item.production_kwh),
+          consumptionKwh: number(item.consumption_kwh),
+          otePriceCzkKwh: item.ote_price_czk_kwh == null ? null : Number(item.ote_price_czk_kwh),
+        })),
+    };
+  });
+}
+
 const PRAGUE = "Europe/Prague";
 
 function pragueOffsetMs(at: Date) {

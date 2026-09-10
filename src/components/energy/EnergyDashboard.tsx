@@ -28,13 +28,16 @@ import {
   ComposedChart,
   Legend,
   Line,
+  ReferenceArea,
+  ReferenceDot,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import Link from "next/link";
-import { describeControlPlan, isSelfUseMode } from "@/lib/energy/control-plan";
+import { buildPlanOverlay, describeControlPlan } from "@/lib/energy/control-plan";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader, StatusBadge } from "@/components/app-shell/PagePrimitives";
@@ -678,6 +681,41 @@ export function EnergyDashboard() {
       })),
     [energyChartData],
   );
+  // The state of charge over the same window as production and consumption, so
+  // the plan drawn over both lines up point for point.
+  const socChartData = useMemo(
+    () => energyChartData.map((point) => ({
+      ...point,
+      measuredSocPct: point.predicted ? null : point.batterySocPct ?? null,
+    })),
+    [energyChartData],
+  );
+  const [showPlan, setShowPlan] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("spottex.dashboard.plan") === "off") setShowPlan(false);
+    } catch {
+      /* a browser that blocks storage simply keeps the default */
+    }
+  }, []);
+  function togglePlan() {
+    setShowPlan((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem("spottex.dashboard.plan", next ? "on" : "off");
+      } catch {
+        /* ignored, see above */
+      }
+      return next;
+    });
+  }
+  const planOverlay = useMemo(() => {
+    if (!snapshot?.schedule?.length) return null;
+    const plan = describeControlPlan(snapshot.schedule, new Date(), 36);
+    const blocks = [...(plan.current ? [plan.current] : []), ...plan.upcoming];
+    const overlay = buildPlanOverlay(blocks, energyChartData.map((point) => ({ at: point.at, key: point.time })));
+    return overlay.segments.length ? { ...overlay, allSelfUse: plan.allSelfUse } : null;
+  }, [energyChartData, snapshot?.schedule]);
 
   if (loading && !snapshot) {
     return (
@@ -903,18 +941,18 @@ export function EnergyDashboard() {
         </div>
       </section>
 
-      {optimizationOn && <ControlPlanSection snapshot={snapshot} />}
-
       <section className="app-card min-w-0 p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold text-slate-900">Výroba a spotřeba: měření a predikce</h2>
             <p className="mt-1 text-sm text-slate-500">
               Vlevo jsou naměřené hodnoty za 24 hodin, přerušovaně navazuje predikce dalších 24 hodin. Jeden bod představuje 15 minut.
+              {planOverlay ? " Podbarvení ukazuje, v jakém režimu má řízení elektrárnu vést." : ""}
             </p>
           </div>
-          <Zap className="size-5 text-brand-600" />
+          {planOverlay ? <PlanToggle on={showPlan} onToggle={togglePlan} /> : <Zap className="size-5 text-brand-600" />}
         </div>
+        {planOverlay && showPlan && <PlanLegend overlay={planOverlay} />}
         <div className="mt-6 h-80 min-w-0">
           {energyChartData.length ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -925,6 +963,19 @@ export function EnergyDashboard() {
                 <YAxis width={72} domain={[0, "auto"]} tickFormatter={formatEnergy} tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                 <Tooltip formatter={(value) => formatEnergy(value)} contentStyle={{ borderRadius: 12, borderColor: "#e2e8f0", fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />
+                {showPlan && planOverlay?.segments.map((segment) => (
+                  <ReferenceArea key={segment.id} x1={segment.fromKey} x2={segment.toKey} fill={segment.color} fillOpacity={segment.opacity} stroke="none" ifOverflow="hidden" />
+                ))}
+                {showPlan && planOverlay?.markers.map((marker) => (
+                  <ReferenceLine
+                    key={marker.id}
+                    x={marker.atKey}
+                    stroke={marker.color}
+                    strokeDasharray="4 4"
+                    ifOverflow="hidden"
+                    label={{ value: marker.caption, position: "insideTopLeft", fill: marker.color, fontSize: 10, offset: 8 }}
+                  />
+                ))}
                 <Area name="Výroba – měření" type="linear" dataKey="measuredProductionKwh" stroke="#59a43c" strokeWidth={2} fill="url(#production)" isAnimationActive={false} connectNulls={false} />
                 <Area name="Spotřeba – měření" type="linear" dataKey="measuredConsumptionKwh" stroke="#64748b" strokeWidth={2} fill="url(#consumption)" isAnimationActive={false} connectNulls={false} />
                 <Line name="Výroba – predikce" type="linear" dataKey="predictedProductionKwh" stroke="#59a43c" strokeDasharray="6 4" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
@@ -971,17 +1022,35 @@ export function EnergyDashboard() {
         <div className="app-card min-w-0 p-5 sm:p-6">
           <div>
             <h2 className="font-semibold text-slate-900">Stav nabití baterií</h2>
-            <p className="mt-1 text-sm text-slate-500">Souhrnný stav nabití všech baterií elektrárny.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Souhrnný stav nabití všech baterií elektrárny.{planOverlay && showPlan ? " Body ukazují, na jaké nabití řízení míří." : ""}
+            </p>
           </div>
           <div className="mt-6 h-64 min-w-0">
-            {batteryChartData.some((point) => point.batterySocPct != null) ? <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={batteryChartData} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
+            {socChartData.some((point) => point.measuredSocPct != null) ? <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={socChartData} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
                 <defs><linearGradient id="batterySoc" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} /><stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="time" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} minTickGap={24} />
                 <YAxis width={64} domain={[0, 100]} tickFormatter={(value) => `${energyNumberFormat.format(Number(value))} %`} tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                 <Tooltip formatter={(value) => `${energyNumberFormat.format(Number(value))} %`} contentStyle={{ borderRadius: 12, borderColor: "#e2e8f0", fontSize: 12 }} />
-                <Area name="SoC" type="monotone" dataKey="batterySocPct" stroke="#8b5cf6" strokeWidth={2} fill="url(#batterySoc)" connectNulls isAnimationActive={false} />
+                {showPlan && planOverlay?.segments.map((segment) => (
+                  <ReferenceArea key={segment.id} x1={segment.fromKey} x2={segment.toKey} fill={segment.color} fillOpacity={segment.opacity} stroke="none" ifOverflow="hidden" />
+                ))}
+                {showPlan && planOverlay?.markers.map((marker) => (marker.targetSocPct == null ? null : (
+                  <ReferenceDot
+                    key={marker.id}
+                    x={marker.atKey}
+                    y={marker.targetSocPct}
+                    r={4}
+                    fill={marker.color}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    ifOverflow="extendDomain"
+                    label={{ value: `cíl ${energyNumberFormat.format(marker.targetSocPct)} %`, position: "top", fill: marker.color, fontSize: 10 }}
+                  />
+                )))}
+                <Area name="Stav nabití" type="monotone" dataKey="measuredSocPct" stroke="#8b5cf6" strokeWidth={2} fill="url(#batterySoc)" connectNulls isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer> : <div className="grid h-full place-items-center text-center text-sm text-slate-400">Historický stav nabití zatím není dostupný.<br />Aktuálně: {soc == null ? "—" : `${energyNumberFormat.format(soc)} %`}</div>}
           </div>
@@ -995,97 +1064,35 @@ function MetricCard({ icon: Icon, label, value, tone = "neutral" }: { icon: type
   return <div className="app-card p-5"><div className="flex items-start justify-between gap-3"><span className={`grid size-10 place-items-center rounded-xl ${tone === "brand" ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600"}`}><Icon className="size-5" /></span><strong className="text-xl font-semibold text-slate-900">{value}</strong></div><p className="mt-4 text-sm font-medium text-slate-600">{label}</p></div>;
 }
 
-
-const timeFormat = new Intl.DateTimeFormat("cs-CZ", { timeZone: "Europe/Prague", weekday: "short", hour: "2-digit", minute: "2-digit" });
-const clockFormat = new Intl.DateTimeFormat("cs-CZ", { timeZone: "Europe/Prague", hour: "2-digit", minute: "2-digit" });
-
-function modeTone(mode: string) {
-  if (isSelfUseMode(mode)) return "bg-brand-500";
-  if (/nabíj|charge/i.test(mode)) return "bg-sky-500";
-  if (/vybíj|discharge/i.test(mode)) return "bg-violet-500";
-  if (/přetok|feed/i.test(mode)) return "bg-amber-500";
-  if (/vypnuto|off/i.test(mode)) return "bg-slate-400";
-  return "bg-slate-500";
+function PlanToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={on}
+      className={`app-button app-button-secondary min-h-8 px-2.5 py-1 text-xs ${on ? "" : "text-slate-500"}`}
+      title={on ? "Skrýt plán řízení v grafu" : "Zobrazit plán řízení v grafu"}
+    >
+      <Zap className="size-3.5" />
+      {on ? "Plán řízení" : "Plán skrytý"}
+    </button>
+  );
 }
 
-/**
- * What the control is doing: the mode now, the blocks ahead, and what the
- * backend last planned and sent. With a single-rate tariff the whole plan is
- * self-use, which is the optimum and would otherwise look like nothing.
- */
-function ControlPlanSection({ snapshot }: { snapshot: EnergyDashboardSnapshot }) {
-  const now = new Date();
-  const plan = describeControlPlan(snapshot.schedule, now);
-  const blocks = [...(plan.current ? [plan.current] : []), ...plan.upcoming];
-  const horizonStart = plan.current ? Math.max(now.getTime(), new Date(plan.current.startAt).getTime()) : now.getTime();
-  const horizonEnd = plan.horizonEndAt ? new Date(plan.horizonEndAt).getTime() : horizonStart + 24 * 3_600_000;
-  const span = Math.max(1, horizonEnd - horizonStart);
-  const activity = snapshot.controlActivity ?? [];
-  const latestPlanAt = activity
-    .map((item) => item.scheduleUpdatedAt ?? item.lastRun?.finishedAt ?? null)
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1) ?? null;
+function PlanLegend({ overlay }: { overlay: { modes: Array<{ mode: string; color: string }>; allSelfUse: boolean } }) {
   return (
-    <section className="app-card min-w-0 p-5 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-semibold text-slate-900">Plán řízení</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {plan.current
-              ? `Teď ${plan.current.mode.toLowerCase()} do ${timeFormat.format(new Date(plan.current.endAt))}.`
-              : "Backend zatím nemá pro nejbližší hodiny žádný plán."}
-            {latestPlanAt ? ` Plán přepočítán ${clockFormat.format(new Date(latestPlanAt))}, přepočet běží každých 15 minut.` : ""}
-          </p>
-        </div>
-        <Zap className="size-5 text-brand-600" />
-      </div>
-      {blocks.length > 0 && (
-        <>
-          <div className="mt-5 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
-            {blocks.map((block) => {
-              const start = Math.max(horizonStart, new Date(block.startAt).getTime());
-              const end = Math.min(horizonEnd, new Date(block.endAt).getTime());
-              if (end <= start) return null;
-              return (
-                <span
-                  key={`${block.startAt}-${block.mode}`}
-                  className={`${modeTone(block.mode)} h-full`}
-                  style={{ width: `${((end - start) / span) * 100}%` }}
-                  title={`${block.mode}: ${timeFormat.format(new Date(block.startAt))} – ${timeFormat.format(new Date(block.endAt))}`}
-                />
-              );
-            })}
-          </div>
-          <ul className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-            {blocks.slice(0, 6).map((block) => (
-              <li key={`${block.startAt}-${block.mode}-row`} className="flex items-center gap-3">
-                <span className={`size-2.5 shrink-0 rounded-full ${modeTone(block.mode)}`} />
-                <span className="text-slate-700">
-                  {timeFormat.format(new Date(block.startAt))} – {timeFormat.format(new Date(block.endAt))}: <strong className="font-medium">{block.mode}</strong>
-                  {block.targetSocPct != null ? <span className="text-slate-500"> · cíl baterie {numberFormat.format(block.targetSocPct)} %</span> : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+      {overlay.modes.map((item) => (
+        <span key={item.mode} className="inline-flex items-center gap-1.5">
+          <span className="size-2.5 rounded-sm" style={{ backgroundColor: item.color, opacity: 0.55 }} />
+          {item.mode}
+        </span>
+      ))}
+      {overlay.allSelfUse && (
+        <span>
+          Celý plán je vlastní spotřeba: při vašich cenách se nabíjení ze sítě ani přednostní přetok nevyplatí.
+        </span>
       )}
-      {plan.allSelfUse && (
-        <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
-          Celý plán je v režimu vlastní spotřeba: při vašich cenách se nabíjení ze sítě ani přednostní přetok nevyplatí, takže řízení nechává střídač spotřebovávat vlastní výrobu. Jakmile se to vyplatí, plán se změní sám.
-        </p>
-      )}
-      {activity.length > 0 && (
-        <ul className="mt-4 space-y-1 text-xs text-slate-500">
-          {activity.map((item) => (
-            <li key={item.inverterId}>
-              Střídač {item.deviceId}: {item.optimizationRunning === false ? "backend řízení neběží" : "řízení běží"}
-              {item.lastRun ? `, poslední přepočet ${clockFormat.format(new Date(item.lastRun.finishedAt))} (${item.lastRun.status === "OK" ? "v pořádku" : item.lastRun.status})` : ", zatím bez přepočtu"}
-              {item.lastCommand ? `, poslední povel ${item.lastCommand.command.replace("_", " ")} v ${clockFormat.format(new Date(item.lastCommand.at))}` : ", zatím bez povelu"}.
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    </div>
   );
 }
